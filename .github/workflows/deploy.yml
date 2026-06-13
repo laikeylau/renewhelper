@@ -14,33 +14,58 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Inject secrets into wrangler.toml
+      - name: Validate Secrets
         run: |
-          # 替换 AUTH_PASSWORD
-          sed -i "s/AUTH_PASSWORD = \"admin\"/AUTH_PASSWORD = \"${{ secrets.AUTH_PASSWORD }}\"/" wrangler.toml
-          
+          echo "=========================================="
+          echo "  验证 Secrets 配置"
+          echo "=========================================="
+          echo ""
+          echo "CF_API_TOKEN: $([ -n '${{ secrets.CF_API_TOKEN }}' ] && echo '已配置' || echo '❌ 未配置')"
+          echo "CF_ACCOUNT_ID: $([ -n '${{ secrets.CF_ACCOUNT_ID }}' ] && echo '已配置' || echo '❌ 未配置')"
+          echo "CF_KV_ID: $([ -n '${{ secrets.CF_KV_ID }}' ] && echo '已配置' || echo '❌ 未配置')"
+          echo "AUTH_PASSWORD: $([ -n '${{ secrets.AUTH_PASSWORD }}' ] && echo '已配置' || echo '❌ 未配置')"
+          echo ""
+          echo "域名 API (可选):"
+          echo "CF_DOMAIN_API_KEY: $([ -n '${{ secrets.CF_DOMAIN_API_KEY }}' ] && echo '已配置' || echo '未配置')"
+          echo "CF_DOMAIN_EMAIL: $([ -n '${{ secrets.CF_DOMAIN_EMAIL }}' ] && echo '已配置' || echo '未配置')"
+          echo "PORKBUN_API_KEY: $([ -n '${{ secrets.PORKBUN_API_KEY }}' ] && echo '已配置' || echo '未配置')"
+          echo ""
+
+      - name: Inject secrets
+        run: |
           # 替换 KV ID
           sed -i 's/^\s*id = ""/id = "${{ secrets.CF_KV_ID }}"/' wrangler.toml
           
-          # 如果配置了域名 API，添加环境变量
-          if [ -n "${{ secrets.CF_DOMAIN_API_KEY }}" ]; then
-            echo "CF_DOMAIN_API_KEY = \"${{ secrets.CF_DOMAIN_API_KEY }}\"" >> wrangler.toml
-          fi
-          if [ -n "${{ secrets.CF_DOMAIN_EMAIL }}" ]; then
-            echo "CF_DOMAIN_EMAIL = \"${{ secrets.CF_DOMAIN_EMAIL }}\"" >> wrangler.toml
-          fi
-          if [ -n "${{ secrets.CF_DOMAIN_API_TYPE }}" ]; then
-            echo "CF_DOMAIN_API_TYPE = \"${{ secrets.CF_DOMAIN_API_TYPE }}\"" >> wrangler.toml
-          fi
-          if [ -n "${{ secrets.PORKBUN_API_KEY }}" ]; then
-            echo "PORKBUN_API_KEY = \"${{ secrets.PORKBUN_API_KEY }}\"" >> wrangler.toml
-          fi
-          if [ -n "${{ secrets.PORKBUN_API_SECRET }}" ]; then
-            echo "PORKBUN_API_SECRET = \"${{ secrets.PORKBUN_API_SECRET }}\"" >> wrangler.toml
-          fi
+          # 替换 AUTH_PASSWORD
+          sed -i "s/AUTH_PASSWORD = \"admin\"/AUTH_PASSWORD = \"${{ secrets.AUTH_PASSWORD }}\"/" wrangler.toml
+
+      - name: Add domain API secrets to wrangler.toml
+        if: ${{ secrets.CF_DOMAIN_API_KEY != '' }}
+        run: |
+          cat >> wrangler.toml << EOF
+          CF_DOMAIN_API_KEY = "${{ secrets.CF_DOMAIN_API_KEY }}"
+          CF_DOMAIN_EMAIL = "${{ secrets.CF_DOMAIN_EMAIL }}"
+          CF_DOMAIN_API_TYPE = "${{ secrets.CF_DOMAIN_API_TYPE || 'global' }}"
+          EOF
+
+      - name: Add Porkbun secrets to wrangler.toml
+        if: ${{ secrets.PORKBUN_API_KEY != '' }}
+        run: |
+          cat >> wrangler.toml << EOF
+          PORKBUN_API_KEY = "${{ secrets.PORKBUN_API_KEY }}"
+          PORKBUN_API_SECRET = "${{ secrets.PORKBUN_API_SECRET }}"
+          EOF
+
+      - name: Show wrangler.toml
+        run: |
+          echo "=========================================="
+          echo "  wrangler.toml 内容"
+          echo "=========================================="
+          cat wrangler.toml
 
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy
