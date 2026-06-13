@@ -1,16 +1,61 @@
 // Domain API Routes
+// KV key for storing domain provider credentials
+const DOMAIN_PROVIDERS_KV_KEY = 'domain_providers_config';
+
+// Default provider config structure
+const DEFAULT_PROVIDERS = {
+    cloudflare: { enabled: false, apiKey: '', email: '', apiType: 'global' },
+    porkbun: { enabled: false, apiKey: '', apiSecret: '' },
+    dnshe: { enabled: false, apiKey: '', apiSecret: '' },
+    digitalplat: { enabled: false, apiKey: '', apiSecret: '' }
+};
+
+// Helper: Get provider config from KV or env
+async function getProviderConfig(env) {
+    // First try KV
+    const kvConfig = await env.RENEW_KV.get(DOMAIN_PROVIDERS_KV_KEY, { type: 'json' });
+    if (kvConfig) return kvConfig;
+    // Fallback to env variables
+    return {
+        cloudflare: {
+            enabled: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL),
+            apiKey: env.CF_DOMAIN_API_KEY || '',
+            email: env.CF_DOMAIN_EMAIL || '',
+            apiType: env.CF_DOMAIN_API_TYPE || 'global'
+        },
+        porkbun: {
+            enabled: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET),
+            apiKey: env.PORKBUN_API_KEY || '',
+            apiSecret: env.PORKBUN_API_SECRET || ''
+        },
+        dnshe: {
+            enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET),
+            apiKey: env.DNSHE_API_KEY || '',
+            apiSecret: env.DNSHE_API_SECRET || ''
+        },
+        digitalplat: {
+            enabled: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET),
+            apiKey: env.DIGITALPLAT_API_KEY || '',
+            apiSecret: env.DIGITALPLAT_API_SECRET || ''
+        }
+    };
+}
+
 const domainSyncMgr = {
-    getProviderStatus(env) {
+    async getProviderStatus(env) {
+        const config = await getProviderConfig(env);
         return {
-            cloudflare: { configured: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), type: env.CF_DOMAIN_API_TYPE || 'global' },
-            porkbun: { configured: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET) },
-            dnshe: { configured: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET) },
-            digitalplat: { configured: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET) }
+            cloudflare: { configured: !!(config.cloudflare.enabled && config.cloudflare.apiKey && config.cloudflare.email), type: config.cloudflare.apiType || 'global' },
+            porkbun: { configured: !!(config.porkbun.enabled && config.porkbun.apiKey && config.porkbun.apiSecret) },
+            dnshe: { configured: !!(config.dnshe.enabled && config.dnshe.apiKey && config.dnshe.apiSecret) },
+            digitalplat: { configured: !!(config.digitalplat.enabled && config.digitalplat.apiKey && config.digitalplat.apiSecret) }
         };
     },
     async syncCloudflare(env) {
-        if (!env.CF_DOMAIN_API_KEY || !env.CF_DOMAIN_EMAIL) throw new Error('Cloudflare API not configured');
-        const headers = env.CF_DOMAIN_API_TYPE === 'token' ? { 'Authorization': 'Bearer ' + env.CF_DOMAIN_API_KEY, 'Content-Type': 'application/json' } : { 'X-Auth-Email': env.CF_DOMAIN_EMAIL, 'X-Auth-Key': env.CF_DOMAIN_API_KEY, 'Content-Type': 'application/json' };
+        const config = await getProviderConfig(env);
+        const { apiKey, email, apiType, enabled } = config.cloudflare;
+        if (!enabled || !apiKey || !email) throw new Error('Cloudflare API not configured');
+        const headers = apiType === 'token' ? { 'Authorization': 'Bearer ' + apiKey, 'Content-Type': 'application/json' } : { 'X-Auth-Email': email, 'X-Auth-Key': apiKey, 'Content-Type': 'application/json' };
         const zones = [];
         let page = 1, hasMore = true;
         while (hasMore) {
@@ -25,10 +70,12 @@ const domainSyncMgr = {
         return zones.map(z => ({ name: z.name, id: z.id, created_on: z.created_on, expires_on: null }));
     },
     async syncPorkbun(env) {
-        if (!env.PORKBUN_API_KEY || !env.PORKBUN_API_SECRET) throw new Error('Porkbun API not configured');
+        const config = await getProviderConfig(env);
+        const { apiKey, apiSecret, enabled } = config.porkbun;
+        if (!enabled || !apiKey || !apiSecret) throw new Error('Porkbun API not configured');
         const resp = await fetch('https://api.porkbun.com/api/json/v3/domain/listAll', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ apikey: env.PORKBUN_API_KEY, secret: env.PORKBUN_API_SECRET })
+            body: JSON.stringify({ apikey: apiKey, secret: apiSecret })
         });
         if (!resp.ok) throw new Error('Porkbun API error: ' + resp.status);
         const data = await resp.json();
@@ -36,10 +83,12 @@ const domainSyncMgr = {
         return Object.entries(data.domains || {}).map(([domain, info]) => ({ name: domain, expires: null }));
     },
     async syncDnshe(env) {
-        if (!env.DNSHE_API_KEY || !env.DNSHE_API_SECRET) throw new Error('DNSHE API not configured');
+        const config = await getProviderConfig(env);
+        const { apiKey, apiSecret, enabled } = config.dnshe;
+        if (!enabled || !apiKey || !apiSecret) throw new Error('DNSHE API not configured');
         const headers = {
-            'X-API-Key': env.DNSHE_API_KEY,
-            'X-API-Secret': env.DNSHE_API_SECRET,
+            'X-API-Key': apiKey,
+            'X-API-Secret': apiSecret,
             'Content-Type': 'application/json'
         };
         const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=500', { headers });
@@ -55,9 +104,11 @@ const domainSyncMgr = {
         }));
     },
     async syncDigitalplat(env) {
-        if (!env.DIGITALPLAT_API_KEY || !env.DIGITALPLAT_API_SECRET) throw new Error('DigitalPlat API not configured');
+        const config = await getProviderConfig(env);
+        const { apiKey, apiSecret, enabled } = config.digitalplat;
+        if (!enabled || !apiKey || !apiSecret) throw new Error('DigitalPlat API not configured');
         const headers = {
-            'Authorization': 'Bearer ' + env.DIGITALPLAT_API_KEY,
+            'Authorization': 'Bearer ' + apiKey,
             'Content-Type': 'application/json'
         };
         const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains', { headers });
@@ -103,7 +154,114 @@ const domainSyncMgr = {
 };
 
 J.get('/api/domain-providers', j(async (A, e) => {
-    return K({ code: 200, data: domainSyncMgr.getProviderStatus(e) });
+    return K({ code: 200, data: await domainSyncMgr.getProviderStatus(e) });
+}));
+
+// Get full provider config (including secrets for editing)
+J.get('/api/domain-providers/config', j(async (A, e) => {
+    const config = await getProviderConfig(e);
+    // Mask secrets for security
+    const masked = {};
+    for (const [provider, settings] of Object.entries(config)) {
+        masked[provider] = { ...settings };
+        if (masked[provider].apiKey) masked[provider].apiKey = masked[provider].apiKey.slice(0, 8) + '***';
+        if (masked[provider].apiSecret) masked[provider].apiSecret = masked[provider].apiSecret.slice(0, 8) + '***';
+        if (masked[provider].email) masked[provider].email = masked[provider].email;
+    }
+    return K({ code: 200, data: masked });
+}));
+
+// Save provider configuration
+J.post('/api/domain-providers/config', j(async (A, e) => {
+    try {
+        const newConfig = await A.json();
+        const currentConfig = await getProviderConfig(e);
+        
+        // Merge with current config (so we don't lose fields)
+        const mergedConfig = { ...currentConfig };
+        
+        for (const [provider, settings] of Object.entries(newConfig)) {
+            if (mergedConfig[provider]) {
+                // Only update fields that are provided and not masked
+                if (settings.apiKey !== undefined && !settings.apiKey.endsWith('***')) {
+                    mergedConfig[provider].apiKey = settings.apiKey;
+                }
+                if (settings.apiSecret !== undefined && !settings.apiSecret.endsWith('***')) {
+                    mergedConfig[provider].apiSecret = settings.apiSecret;
+                }
+                if (settings.email !== undefined) {
+                    mergedConfig[provider].email = settings.email;
+                }
+                if (settings.apiType !== undefined) {
+                    mergedConfig[provider].apiType = settings.apiType;
+                }
+                if (settings.enabled !== undefined) {
+                    mergedConfig[provider].enabled = settings.enabled;
+                }
+            }
+        }
+        
+        // Save to KV
+        await e.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(mergedConfig));
+        
+        return K({ code: 200, msg: 'CONFIG_SAVED' });
+    } catch (error) {
+        return S('SAVE_FAILED: ' + error.message, 500);
+    }
+}));
+
+// Test provider connection
+J.post('/api/domain-providers/test', j(async (A, e) => {
+    try {
+        const { provider } = await A.json();
+        const config = await getProviderConfig(e);
+        const providerConfig = config[provider];
+        
+        if (!providerConfig || !providerConfig.enabled) {
+            return S('PROVIDER_NOT_ENABLED', 400);
+        }
+        
+        let testResult = false;
+        let testMessage = '';
+        
+        try {
+            if (provider === 'cloudflare') {
+                const headers = providerConfig.apiType === 'token' 
+                    ? { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+                    : { 'X-Auth-Email': providerConfig.email, 'X-Auth-Key': providerConfig.apiKey, 'Content-Type': 'application/json' };
+                const resp = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers });
+                const data = await resp.json();
+                testResult = data.success;
+                testMessage = data.success ? 'Connection successful' : (data.errors?.[0]?.message || 'Verification failed');
+            } else if (provider === 'porkbun') {
+                const resp = await fetch('https://api.porkbun.com/api/json/v3/ping', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apikey: providerConfig.apiKey, secret: providerConfig.apiSecret })
+                });
+                const data = await resp.json();
+                testResult = data.status === 'SUCCESS';
+                testMessage = data.status === 'SUCCESS' ? 'Connection successful' : (data.message || 'Verification failed');
+            } else if (provider === 'dnshe') {
+                const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
+                    headers: { 'X-API-Key': providerConfig.apiKey, 'X-API-Secret': providerConfig.apiSecret, 'Content-Type': 'application/json' }
+                });
+                testResult = resp.ok;
+                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+            } else if (provider === 'digitalplat') {
+                const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains?per_page=1', {
+                    headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+                });
+                testResult = resp.ok;
+                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+            }
+        } catch (err) {
+            testMessage = 'Connection error: ' + err.message;
+        }
+        
+        return K({ code: 200, data: { success: testResult, message: testMessage } });
+    } catch (error) {
+        return S('TEST_FAILED: ' + error.message, 500);
+    }
 }));
 
 J.post('/api/sync-domains/cloudflare', j(async (A, e) => {
@@ -148,7 +306,7 @@ J.post('/api/sync-domains/digitalplat', j(async (A, e) => {
 
 J.post('/api/sync-domains/all', j(async (A, e) => {
     const results = { cloudflare: null, porkbun: null, dnshe: null, digitalplat: null, total: 0 };
-    const status = domainSyncMgr.getProviderStatus(e);
+    const status = await domainSyncMgr.getProviderStatus(e);
     if (status.cloudflare.configured) {
         try {
             const domains = await domainSyncMgr.syncCloudflare(e);

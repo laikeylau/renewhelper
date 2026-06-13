@@ -1,0 +1,315 @@
+<!--
+  域名商配置 UI 组件
+  添加到 RenewHelper 设置页面
+-->
+
+<div class="domain-config-section" style="margin-top: 24px; padding: 20px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+    <span style="font-size: 20px;">⚙️</span>
+    <h3 style="margin: 0; font-size: 16px; font-weight: 600;">域名商API配置 (Domain Provider Settings)</h3>
+  </div>
+  
+  <p style="margin: 0 0 16px 0; color: var(--el-text-color-secondary); font-size: 14px;">
+    配置域名商API密钥，用于自动同步域名。密钥将安全存储在KV中。
+  </p>
+
+  <!-- Cloudflare 配置 -->
+  <div class="provider-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;">☁️</span>
+        <span style="font-weight: 600;">Cloudflare</span>
+        <span id="cf-config-status" style="font-size: 12px; color: var(--el-text-color-secondary);">未配置</span>
+      </div>
+      <el-switch id="cf-enabled" v-model="providers.cloudflare.enabled" @change="saveProvider('cloudflare')"></el-switch>
+    </div>
+    <div id="cf-config-form" style="display: none;">
+      <div style="display: grid; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API类型</label>
+          <el-select id="cf-api-type" v-model="providers.cloudflare.apiType" style="width: 100%;" @change="saveProvider('cloudflare')">
+            <el-option label="Global API Key" value="global"></el-option>
+            <el-option label="API Token" value="token"></el-option>
+          </el-select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">
+            <span id="cf-key-label">Global API Key</span>
+          </label>
+          <el-input id="cf-api-key" v-model="providers.cloudflare.apiKey" placeholder="输入API密钥" show-password @blur="saveProvider('cloudflare')"></el-input>
+        </div>
+        <div id="cf-email-field">
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">邮箱 (Email)</label>
+          <el-input id="cf-email" v-model="providers.cloudflare.email" placeholder="Cloudflare账户邮箱" @blur="saveProvider('cloudflare')"></el-input>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button size="small" type="primary" @click="testProvider('cloudflare')">测试连接</el-button>
+          <el-button size="small" @click="testProvider('cloudflare')">同步域名</el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Porkbun 配置 -->
+  <div class="provider-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;">🐷</span>
+        <span style="font-weight: 600;">Porkbun</span>
+        <span id="pb-config-status" style="font-size: 12px; color: var(--el-text-color-secondary);">未配置</span>
+      </div>
+      <el-switch id="pb-enabled" v-model="providers.porkbun.enabled" @change="saveProvider('porkbun')"></el-switch>
+    </div>
+    <div id="pb-config-form" style="display: none;">
+      <div style="display: grid; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Key</label>
+          <el-input id="pb-api-key" v-model="providers.porkbun.apiKey" placeholder="输入API Key" show-password @blur="saveProvider('porkbun')"></el-input>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Secret</label>
+          <el-input id="pb-api-secret" v-model="providers.porkbun.apiSecret" placeholder="输入API Secret" show-password @blur="saveProvider('porkbun')"></el-input>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button size="small" type="primary" @click="testProvider('porkbun')">测试连接</el-button>
+          <el-button size="small" @click="syncDomains('porkbun')">同步域名</el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DNSHE 配置 -->
+  <div class="provider-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;">🌐</span>
+        <span style="font-weight: 600;">DNSHE</span>
+        <span id="dnshe-config-status" style="font-size: 12px; color: var(--el-text-color-secondary);">未配置</span>
+      </div>
+      <el-switch id="dnshe-enabled" v-model="providers.dnshe.enabled" @change="saveProvider('dnshe')"></el-switch>
+    </div>
+    <div id="dnshe-config-form" style="display: none;">
+      <div style="display: grid; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Key</label>
+          <el-input id="dnshe-api-key" v-model="providers.dnshe.apiKey" placeholder="输入API Key" show-password @blur="saveProvider('dnshe')"></el-input>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Secret</label>
+          <el-input id="dnshe-api-secret" v-model="providers.dnshe.apiSecret" placeholder="输入API Secret" show-password @blur="saveProvider('dnshe')"></el-input>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button size="small" type="primary" @click="testProvider('dnshe')">测试连接</el-button>
+          <el-button size="small" @click="syncDomains('dnshe')">同步域名</el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DigitalPlat 配置 -->
+  <div class="provider-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter);">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;">🔑</span>
+        <span style="font-weight: 600;">DigitalPlat</span>
+        <span id="dp-config-status" style="font-size: 12px; color: var(--el-text-color-secondary);">未配置</span>
+      </div>
+      <el-switch id="dp-enabled" v-model="providers.digitalplat.enabled" @change="saveProvider('digitalplat')"></el-switch>
+    </div>
+    <div id="dp-config-form" style="display: none;">
+      <div style="display: grid; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Key</label>
+          <el-input id="dp-api-key" v-model="providers.digitalplat.apiKey" placeholder="输入API Key" show-password @blur="saveProvider('digitalplat')"></el-input>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Secret</label>
+          <el-input id="dp-api-secret" v-model="providers.digitalplat.apiSecret" placeholder="输入API Secret" show-password @blur="saveProvider('digitalplat')"></el-input>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <el-button size="small" type="primary" @click="testProvider('digitalplat')">测试连接</el-button>
+          <el-button size="small" @click="syncDomains('digitalplat')">同步域名</el-button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 测试结果提示 -->
+  <div id="config-test-result" style="display: none; margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 14px;"></div>
+</div>
+
+<script>
+// Provider configuration data
+const providerConfig = reactive({
+  cloudflare: { enabled: false, apiKey: '', email: '', apiType: 'global' },
+  porkbun: { enabled: false, apiKey: '', apiSecret: '' },
+  dnshe: { enabled: false, apiKey: '', apiSecret: '' },
+  digitalplat: { enabled: false, apiKey: '', apiSecret: '' }
+});
+
+// Load provider configuration
+async function loadProviderConfig() {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers/config', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await response.json();
+    
+    if (data.code === 200) {
+      // Update providers (note: secrets are masked)
+      Object.assign(providerConfig, data.data);
+      updateUI();
+    }
+  } catch (error) {
+    console.error('Failed to load provider config:', error);
+  }
+}
+
+// Save provider configuration
+async function saveProvider(provider) {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers/config', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ [provider]: providerConfig[provider] })
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      updateUI();
+      showTestResult('success', '配置已保存');
+    } else {
+      showTestResult('error', '保存失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '保存失败: ' + error.message);
+  }
+}
+
+// Test provider connection
+async function testProvider(provider) {
+  try {
+    showTestResult('info', '正在测试连接...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers/test', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ provider })
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      if (data.data.success) {
+        showTestResult('success', '连接成功: ' + data.data.message);
+      } else {
+        showTestResult('error', '连接失败: ' + data.data.message);
+      }
+    } else {
+      showTestResult('error', '测试失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '测试失败: ' + error.message);
+  }
+}
+
+// Sync domains
+async function syncDomains(provider) {
+  try {
+    showTestResult('info', '正在同步域名...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const endpoint = '/api/sync-domains/' + provider;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      const result = data.data;
+      showTestResult('success', '同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个');
+    } else {
+      showTestResult('error', '同步失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '同步失败: ' + error.message);
+  }
+}
+
+// Update UI based on config
+function updateUI() {
+  // Update status indicators
+  const providers = ['cloudflare', 'porkbun', 'dnshe', 'digitalplat'];
+  providers.forEach(provider => {
+    const config = providerConfig[provider];
+    const statusEl = document.getElementById(provider.substring(0, 2) + '-config-status') || 
+                     document.getElementById(provider + '-config-status');
+    const formEl = document.getElementById(provider.substring(0, 2) + '-config-form') || 
+                   document.getElementById(provider + '-config-form');
+    
+    if (statusEl) {
+      if (config.enabled && config.apiKey) {
+        statusEl.textContent = '已配置';
+        statusEl.style.color = '#67c23a';
+      } else {
+        statusEl.textContent = '未配置';
+        statusEl.style.color = '';
+      }
+    }
+    
+    if (formEl) {
+      formEl.style.display = config.enabled ? 'block' : 'none';
+    }
+  });
+  
+  // Update Cloudflare label based on API type
+  const cfLabel = document.getElementById('cf-key-label');
+  const cfEmailField = document.getElementById('cf-email-field');
+  if (cfLabel) {
+    cfLabel.textContent = providerConfig.cloudflare.apiType === 'token' ? 'API Token' : 'Global API Key';
+  }
+  if (cfEmailField) {
+    cfEmailField.style.display = providerConfig.cloudflare.apiType === 'token' ? 'none' : 'block';
+  }
+}
+
+// Show test result
+function showTestResult(type, message) {
+  const resultEl = document.getElementById('config-test-result');
+  if (!resultEl) return;
+  
+  resultEl.style.display = 'block';
+  
+  const colors = {
+    success: { bg: 'rgba(103, 194, 58, 0.1)', border: 'rgba(103, 194, 58, 0.3)' },
+    error: { bg: 'rgba(245, 108, 108, 0.1)', border: 'rgba(245, 108, 108, 0.3)' },
+    info: { bg: 'rgba(64, 158, 255, 0.1)', border: 'rgba(64, 158, 255, 0.3)' }
+  };
+  
+  const color = colors[type] || colors.info;
+  resultEl.style.background = color.bg;
+  resultEl.style.border = '1px solid ' + color.border;
+  resultEl.textContent = message;
+  
+  if (type !== 'info') {
+    setTimeout(() => { resultEl.style.display = 'none'; }, 5000);
+  }
+}
+
+// Initialize on mount
+onMounted(() => {
+  loadProviderConfig();
+});
+</script>

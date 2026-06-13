@@ -8,6 +8,7 @@ import ServerChan3 from './components/icons/ServerChan3.vue';
 import DingTalk from './components/icons/DingTalk.vue';
 import Lark from './components/icons/Lark.vue';
 import WeCom from './components/icons/WeCom.vue';
+import DomainConfig from './components/DomainConfig.vue';
 
 // 图标解构
 const { Edit, Delete, Plus, VideoPlay, Setting, Bell, Document, Lock, Monitor, SwitchButton, Calendar, Timer, Files, AlarmClock, Warning, Search, Cpu, Upload, Download, Link, Connection, Message, Promotion, Iphone, Moon, Sunny, RefreshRight, More, ArrowDown, Tickets, Sort, ArrowLeft, ArrowRight, InfoFilled, Close, Coin, Position, Notification, Comment, SuccessFilled, WarningFilled, DocumentCopy } = ElementPlusIconsVue;
@@ -265,7 +266,7 @@ const isLoggedIn = ref(!!localStorage.getItem('jwt_token')), password = ref(''),
 const dataVersion = ref(0); // 新增版本号状态
 const hasNewVersion = ref(false); // 版本更新提示
 const newVersionCode = ref('');
-const dialogVisible = ref(false), settingsVisible = ref(false), historyVisible = ref(false), historyLoading = ref(false), historyLogs = ref([]);
+const dialogVisible = ref(false), settingsVisible = ref(false), historyVisible = ref(false), historyLoading = ref(false), historyLogs = ref([]), domainConfigVisible = ref(false);
 const checking = ref(false), logs = ref([]), displayLogs = ref([]), isEdit = ref(false), lang = ref('zh'), currentTag = ref(''), searchKeyword = ref('');
 const currentView = ref('project');
 const calendarMonth = ref((() => { try { const tz = settings.value?.timezone || 'UTC'; const s = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); return s.substring(0, 7); } catch (e) { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); } })());
@@ -1907,6 +1908,9 @@ const openSettings = () => {
     if (!settingsForm.value.channels) settingsForm.value.channels = [];
     settingsVisible.value = true;
 };
+const openDomainConfig = () => {
+    domainConfigVisible.value = true;
+};
 const generateBackupKey = () => {
     // 生成16位随机密钥，确保包含字母和数字
     const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -3068,6 +3072,8 @@ const openLink = (url) => { if (url) window.open(url, '_blank'); };
                         <div class="w-px h-8 bg-border mx-1 self-center"></div>
                         <el-button class="mecha-btn !bg-indigo-600 !text-white" :icon="Setting" @click="openSettings">{{
                             t('settings') }}</el-button>
+                        <el-button class="mecha-btn !bg-violet-600 !text-white" :icon="Connection" @click="openDomainConfig">
+                            {{ lang === 'zh' ? '域名' : 'Domains' }}</el-button>
                         <el-button class="mecha-btn !bg-amber-600 !text-white" :icon="Document"
                             @click="openHistoryLogs">{{
                                 t('logs') }}</el-button>
@@ -4805,6 +4811,17 @@ const openLink = (url) => { if (url) window.open(url, '_blank'); };
                         </div>
                     </div>
                 </div>
+            </el-dialog>
+
+            <!-- Domain Provider Config Dialog -->
+            <el-dialog
+                v-model="domainConfigVisible"
+                :title="lang === 'zh' ? '域名商API配置' : 'Domain Provider Settings'"
+                width="600px"
+                class="mecha-panel !rounded-none"
+                :close-on-click-modal="false"
+            >
+                <DomainConfig />
             </el-dialog>
 
             <!-- Renew Dialog (also used for Add History) -->
