@@ -2466,14 +2466,29 @@ async function syncDomainsFromProvider(env, provider) {
     return { synced: imported.length, skipped: skipped.length };
 }
 
-app.post("/api/sync-domains/:provider", async (req, env, url) => {
+async function syncSingleProvider(env, provider) {
     try {
-        const provider = url.searchParams.get('provider') || req.url.split('/').pop();
         const result = await syncDomainsFromProvider(env, provider);
         return response({ code: 200, data: result });
     } catch (err) {
         return error('SYNC_FAILED: ' + err.message, 500);
     }
+}
+
+app.post("/api/sync-domains/cloudflare", async (req, env) => {
+    return await syncSingleProvider(env, 'cloudflare');
+});
+
+app.post("/api/sync-domains/porkbun", async (req, env) => {
+    return await syncSingleProvider(env, 'porkbun');
+});
+
+app.post("/api/sync-domains/dnshe", async (req, env) => {
+    return await syncSingleProvider(env, 'dnshe');
+});
+
+app.post("/api/sync-domains/digitalplat", async (req, env) => {
+    return await syncSingleProvider(env, 'digitalplat');
 });
 
 app.post("/api/sync-domains/all", async (req, env) => {
