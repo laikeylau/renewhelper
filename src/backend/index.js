@@ -2194,6 +2194,130 @@ app.get("/api/calendar.ics", async (req, env, url) => {
 // Domain Provider API Configuration
 // ==========================================
 const DOMAIN_PROVIDERS_KV_KEY = 'domain_providers_config';
+const DIGITALPLAT_API_BASES = [
+    'https://domain-api.digitalplat.org/api/v1',
+    'https://dash.domain.digitalplat.org/api/v1'
+];
+
+function getDnsheHeaders(providerConfig) {
+    return {
+        'X-API-Key': providerConfig.apiKey,
+        'X-API-Secret': providerConfig.apiSecret,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    };
+}
+
+function getDigitalPlatHeaders(providerConfig) {
+    return {
+        'Authorization': 'Bearer ' + providerConfig.apiKey,
+        'X-API-Key': providerConfig.apiKey,
+        'X-API-Secret': providerConfig.apiSecret,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    };
+}
+
+async function safeReadJson(resp) {
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return null;
+    try {
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
+async function describeProviderHttpError(provider, resp) {
+    const data = await safeReadJson(resp.clone());
+    const message = data?.message || data?.error || data?.msg;
+    if (message) return `${provider} API error: ${resp.status} ${message}`;
+
+    if (resp.headers.get('cf-mitigated')) {
+        return `${provider} API error: ${resp.status} Cloudflare challenge blocked the request`;
+    }
+
+    const text = (await resp.text()).replace(/\s+/g, ' ').trim();
+    if (!text) return `${provider} API error: ${resp.status}`;
+    if (text.startsWith('<!DOCTYPE html') || text.startsWith('<html')) {
+        return `${provider} API error: ${resp.status} Unexpected HTML response`;
+    }
+    return `${provider} API error: ${resp.status} ${text.slice(0, 200)}`;
+}
+
+async function fetchDnsheDomains(providerConfig) {
+    const perPage = 500;
+    const domains = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+        const resp = await fetch(`https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&page=${page}&per_page=${perPage}`, {
+            headers: getDnsheHeaders(providerConfig)
+        });
+        const data = await safeReadJson(resp.clone());
+
+        if (!resp.ok) {
+            throw new Error(data?.message || await describeProviderHttpError('DNSHE', resp));
+        }
+        if (!data?.success) {
+            throw new Error('DNSHE API error: ' + (data?.message || data?.error || 'Unknown'));
+        }
+
+        const pageDomains = Array.isArray(data.subdomains) ? data.subdomains : [];
+        domains.push(...pageDomains);
+
+        hasMore = Boolean(data.pagination?.has_more) || pageDomains.length === perPage;
+        if (!pageDomains.length) hasMore = false;
+        page += 1;
+        if (page > 1000) throw new Error('DNSHE API error: pagination exceeded safety limit');
+    }
+
+    return domains.map((d) => ({
+        name: d.full_domain || (d.subdomain + '.' + d.rootdomain),
+        id: d.id,
+        created_on: d.created_at,
+        expires_on: d.expires_at || null
+    }));
+}
+
+async function fetchDigitalPlatDomains(providerConfig, perPage = 100) {
+    const failures = [];
+
+    for (const baseUrl of DIGITALPLAT_API_BASES) {
+        const resp = await fetch(`${baseUrl}/domains?per_page=${perPage}`, {
+            headers: getDigitalPlatHeaders(providerConfig)
+        });
+        const data = await safeReadJson(resp.clone());
+
+        if (!resp.ok) {
+            failures.push(await describeProviderHttpError('DigitalPlat', resp));
+            continue;
+        }
+        if (data?.success === false) {
+            failures.push('DigitalPlat API error: ' + (data.message || data.error || 'Unknown'));
+            continue;
+        }
+
+        const domainList = Array.isArray(data)
+            ? data
+            : data?.domains || data?.data || data?.result || data?.items || [];
+
+        if (!Array.isArray(domainList)) {
+            failures.push(`DigitalPlat API error: unexpected response format from ${baseUrl}`);
+            continue;
+        }
+
+        return domainList.map((d) => ({
+            name: d.name || d.domain,
+            id: d.id,
+            created_on: d.created_at || d.registration_date,
+            expires_on: d.expires_at || d.expiration_date || null
+        })).filter((d) => d.name);
+    }
+
+    throw new Error(failures.join(' | ') || 'DigitalPlat API request failed');
+}
 
 async function getProviderConfig(env) {
     const kvConfig = await env.RENEW_KV.get(DOMAIN_PROVIDERS_KV_KEY, { type: 'json' });
@@ -2254,8 +2378,8 @@ app.post("/api/domain-providers/config", async (req, env) => {
         
         await env.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(mergedConfig));
         return response({ code: 200, msg: 'CONFIG_SAVED' });
-    } catch (error) {
-        return error('SAVE_FAILED: ' + error.message, 500);
+    } catch (err) {
+        return error('SAVE_FAILED: ' + err.message, 500);
     }
 });
 
@@ -2289,21 +2413,9 @@ async function syncDomainsFromProvider(env, provider) {
         if (data.status !== 'SUCCESS') throw new Error('Porkbun API error: ' + data.message);
         domains = Object.entries(data.domains || {}).map(([domain, info]) => ({ name: domain, expires: null }));
     } else if (provider === 'dnshe') {
-        const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=500', {
-            headers: { 'X-API-Key': providerConfig.apiKey, 'X-API-Secret': providerConfig.apiSecret, 'Content-Type': 'application/json' }
-        });
-        if (!resp.ok) throw new Error('DNSHE API error: ' + resp.status);
-        const data = await resp.json();
-        if (!data.success) throw new Error('DNSHE API error: ' + (data.message || 'Unknown'));
-        domains = (data.subdomains || []).map(d => ({ name: d.full_domain || (d.subdomain + '.' + d.rootdomain), id: d.id, created_on: d.created_at, expires_on: d.expires_at || null }));
+        domains = await fetchDnsheDomains(providerConfig);
     } else if (provider === 'digitalplat') {
-        const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains', {
-            headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
-        });
-        if (!resp.ok) throw new Error('DigitalPlat API error: ' + resp.status);
-        const data = await resp.json();
-        const domainList = data.domains || data.data || data.result || [];
-        domains = domainList.map(d => ({ name: d.name || d.domain, id: d.id, created_on: d.created_at || d.registration_date, expires_on: d.expires_at || d.expiration_date || null }));
+        domains = await fetchDigitalPlatDomains(providerConfig);
     }
     
     // Import domains
@@ -2341,8 +2453,8 @@ app.post("/api/sync-domains/:provider", async (req, env, url) => {
         const provider = url.searchParams.get('provider') || req.url.split('/').pop();
         const result = await syncDomainsFromProvider(env, provider);
         return response({ code: 200, data: result });
-    } catch (error) {
-        return error('SYNC_FAILED: ' + error.message, 500);
+    } catch (err) {
+        return error('SYNC_FAILED: ' + err.message, 500);
     }
 });
 
@@ -2362,8 +2474,8 @@ app.post("/api/sync-domains/all", async (req, env) => {
             }
         }
         return response({ code: 200, data: results });
-    } catch (error) {
-        return error('SYNC_FAILED: ' + error.message, 500);
+    } catch (err) {
+        return error('SYNC_FAILED: ' + err.message, 500);
     }
 });
 
@@ -2400,24 +2512,30 @@ app.post("/api/domain-providers/test", async (req, env) => {
                 testMessage = data.status === 'SUCCESS' ? 'Connection successful' : (data.message || 'Verification failed');
             } else if (provider === 'dnshe') {
                 const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
-                    headers: { 'X-API-Key': providerConfig.apiKey, 'X-API-Secret': providerConfig.apiSecret, 'Content-Type': 'application/json' }
+                    headers: getDnsheHeaders(providerConfig)
                 });
-                testResult = resp.ok;
-                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+                const data = await safeReadJson(resp.clone());
+                testResult = resp.ok && data?.success !== false;
+                testMessage = testResult
+                    ? 'Connection successful'
+                    : (data?.message || await describeProviderHttpError('DNSHE', resp));
             } else if (provider === 'digitalplat') {
-                const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains?per_page=1', {
-                    headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
-                });
-                testResult = resp.ok;
-                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+                try {
+                    await fetchDigitalPlatDomains(providerConfig, 1);
+                    testResult = true;
+                    testMessage = 'Connection successful';
+                } catch (digitalPlatError) {
+                    testResult = false;
+                    testMessage = digitalPlatError.message;
+                }
             }
         } catch (err) {
             testMessage = 'Connection error: ' + err.message;
         }
         
         return response({ code: 200, data: { success: testResult, message: testMessage } });
-    } catch (error) {
-        return error('TEST_FAILED: ' + error.message, 500);
+    } catch (err) {
+        return error('TEST_FAILED: ' + err.message, 500);
     }
 });
 

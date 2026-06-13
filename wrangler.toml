@@ -12,8 +12,8 @@ name = "renewhelper-staging"
 # 绑定 KV 数据库
 [[kv_namespaces]]
 binding = "RENEW_KV"
-id = ""
-preview_id = ""
+id = "db359350c2f747f1bf1bad64857cbf08"
+preview_id = "db359350c2f747f1bf1bad64857cbf08"
 
 # 定时任务
 [triggers]
