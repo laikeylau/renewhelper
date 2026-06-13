@@ -2190,6 +2190,237 @@ app.get("/api/calendar.ics", async (req, env, url) => {
     });
 });
 
+// ==========================================
+// Domain Provider API Configuration
+// ==========================================
+const DOMAIN_PROVIDERS_KV_KEY = 'domain_providers_config';
+
+async function getProviderConfig(env) {
+    const kvConfig = await env.RENEW_KV.get(DOMAIN_PROVIDERS_KV_KEY, { type: 'json' });
+    if (kvConfig) return kvConfig;
+    return {
+        cloudflare: { enabled: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), apiKey: env.CF_DOMAIN_API_KEY || '', email: env.CF_DOMAIN_EMAIL || '', apiType: env.CF_DOMAIN_API_TYPE || 'global' },
+        porkbun: { enabled: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET), apiKey: env.PORKBUN_API_KEY || '', apiSecret: env.PORKBUN_API_SECRET || '' },
+        dnshe: { enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET), apiKey: env.DNSHE_API_KEY || '', apiSecret: env.DNSHE_API_SECRET || '' },
+        digitalplat: { enabled: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET), apiKey: env.DIGITALPLAT_API_KEY || '', apiSecret: env.DIGITALPLAT_API_SECRET || '' }
+    };
+}
+
+// Get provider status
+app.get("/api/domain-providers", async (req, env) => {
+    const config = await getProviderConfig(env);
+    return response({
+        code: 200, data: {
+            cloudflare: { configured: !!(config.cloudflare.enabled && config.cloudflare.apiKey && config.cloudflare.email), type: config.cloudflare.apiType || 'global' },
+            porkbun: { configured: !!(config.porkbun.enabled && config.porkbun.apiKey && config.porkbun.apiSecret) },
+            dnshe: { configured: !!(config.dnshe.enabled && config.dnshe.apiKey && config.dnshe.apiSecret) },
+            digitalplat: { configured: !!(config.digitalplat.enabled && config.digitalplat.apiKey && config.digitalplat.apiSecret) }
+        }
+    });
+});
+
+// Get provider config (masked)
+app.get("/api/domain-providers/config", async (req, env) => {
+    const config = await getProviderConfig(env);
+    const masked = {};
+    for (const [provider, settings] of Object.entries(config)) {
+        masked[provider] = { ...settings };
+        if (masked[provider].apiKey) masked[provider].apiKey = masked[provider].apiKey.slice(0, 8) + '***';
+        if (masked[provider].apiSecret) masked[provider].apiSecret = masked[provider].apiSecret.slice(0, 8) + '***';
+    }
+    return response({ code: 200, data: masked });
+});
+
+// Save provider config
+app.post("/api/domain-providers/config", async (req, env) => {
+    try {
+        const newConfig = await req.json();
+        const currentConfig = await getProviderConfig(env);
+        const mergedConfig = { ...currentConfig };
+        
+        for (const [provider, settings] of Object.entries(newConfig)) {
+            if (mergedConfig[provider]) {
+                if (settings.apiKey !== undefined && !settings.apiKey.endsWith('***')) {
+                    mergedConfig[provider].apiKey = settings.apiKey;
+                }
+                if (settings.apiSecret !== undefined && !settings.apiSecret.endsWith('***')) {
+                    mergedConfig[provider].apiSecret = settings.apiSecret;
+                }
+                if (settings.email !== undefined) mergedConfig[provider].email = settings.email;
+                if (settings.apiType !== undefined) mergedConfig[provider].apiType = settings.apiType;
+                if (settings.enabled !== undefined) mergedConfig[provider].enabled = settings.enabled;
+            }
+        }
+        
+        await env.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(mergedConfig));
+        return response({ code: 200, msg: 'CONFIG_SAVED' });
+    } catch (error) {
+        return error('SAVE_FAILED: ' + error.message, 500);
+    }
+});
+
+// Sync domains from provider
+async function syncDomainsFromProvider(env, provider) {
+    const config = await getProviderConfig(env);
+    const providerConfig = config[provider];
+    
+    if (!providerConfig || !providerConfig.enabled) {
+        throw new Error(provider + ' API not configured');
+    }
+    
+    let domains = [];
+    
+    if (provider === 'cloudflare') {
+        const headers = providerConfig.apiType === 'token'
+            ? { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+            : { 'X-Auth-Email': providerConfig.email, 'X-Auth-Key': providerConfig.apiKey, 'Content-Type': 'application/json' };
+        const resp = await fetch('https://api.cloudflare.com/client/v4/zones?page=1&per_page=50', { headers });
+        if (!resp.ok) throw new Error('Cloudflare API error: ' + resp.status);
+        const data = await resp.json();
+        if (!data.success) throw new Error('Cloudflare API error: ' + JSON.stringify(data.errors));
+        domains = data.result.map(z => ({ name: z.name, id: z.id, created_on: z.created_on, expires_on: null }));
+    } else if (provider === 'porkbun') {
+        const resp = await fetch('https://api.porkbun.com/api/json/v3/domain/listAll', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apikey: providerConfig.apiKey, secret: providerConfig.apiSecret })
+        });
+        if (!resp.ok) throw new Error('Porkbun API error: ' + resp.status);
+        const data = await resp.json();
+        if (data.status !== 'SUCCESS') throw new Error('Porkbun API error: ' + data.message);
+        domains = Object.entries(data.domains || {}).map(([domain, info]) => ({ name: domain, expires: null }));
+    } else if (provider === 'dnshe') {
+        const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=500', {
+            headers: { 'X-API-Key': providerConfig.apiKey, 'X-API-Secret': providerConfig.apiSecret, 'Content-Type': 'application/json' }
+        });
+        if (!resp.ok) throw new Error('DNSHE API error: ' + resp.status);
+        const data = await resp.json();
+        if (!data.success) throw new Error('DNSHE API error: ' + (data.message || 'Unknown'));
+        domains = (data.subdomains || []).map(d => ({ name: d.full_domain || (d.subdomain + '.' + d.rootdomain), id: d.id, created_on: d.created_at, expires_on: d.expires_at || null }));
+    } else if (provider === 'digitalplat') {
+        const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains', {
+            headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+        });
+        if (!resp.ok) throw new Error('DigitalPlat API error: ' + resp.status);
+        const data = await resp.json();
+        const domainList = data.domains || data.data || data.result || [];
+        domains = domainList.map(d => ({ name: d.name || d.domain, id: d.id, created_on: d.created_at || d.registration_date, expires_on: d.expires_at || d.expiration_date || null }));
+    }
+    
+    // Import domains
+    const data = await env.RENEW_KV.get('items', { type: 'json' });
+    const items = data?.items || [];
+    const version = data?.version || 0;
+    const existing = new Set(items.filter(i => i.tags?.includes('Domain')).map(i => i.name.toLowerCase()));
+    const imported = [], skipped = [];
+    
+    for (const domain of domains) {
+        if (existing.has(domain.name.toLowerCase())) {
+            skipped.push({ name: domain.name, status: 'skipped' });
+            continue;
+        }
+        imported.push({
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            name: domain.name, tags: ['Domain', provider], type: 'reset', enabled: true,
+            createDate: new Date().toISOString().split('T')[0],
+            lastRenewDate: new Date().toISOString().split('T')[0],
+            intervalDays: 365, cycleUnit: 'year', notifyDays: 30, notifyTime: '09:00',
+            autoRenew: false, message: 'Provider: ' + provider, fixedPrice: 0, currency: 'USD',
+            notifyTimes: ['09:00'], notifyChannelIds: [], renewHistory: [], renewUrl: ''
+        });
+        existing.add(domain.name.toLowerCase());
+    }
+    
+    if (imported.length > 0) {
+        await env.RENEW_KV.put('items', JSON.stringify({ items: [...items, ...imported], version: version + 1 }));
+    }
+    return { synced: imported.length, skipped: skipped.length };
+}
+
+app.post("/api/sync-domains/:provider", async (req, env, url) => {
+    try {
+        const provider = url.searchParams.get('provider') || req.url.split('/').pop();
+        const result = await syncDomainsFromProvider(env, provider);
+        return response({ code: 200, data: result });
+    } catch (error) {
+        return error('SYNC_FAILED: ' + error.message, 500);
+    }
+});
+
+app.post("/api/sync-domains/all", async (req, env) => {
+    try {
+        const results = { cloudflare: null, porkbun: null, dnshe: null, digitalplat: null, total: 0 };
+        const config = await getProviderConfig(env);
+        
+        for (const provider of ['cloudflare', 'porkbun', 'dnshe', 'digitalplat']) {
+            if (config[provider]?.enabled) {
+                try {
+                    results[provider] = await syncDomainsFromProvider(env, provider);
+                    results.total += results[provider].synced;
+                } catch (err) {
+                    results[provider] = { error: err.message };
+                }
+            }
+        }
+        return response({ code: 200, data: results });
+    } catch (error) {
+        return error('SYNC_FAILED: ' + error.message, 500);
+    }
+});
+
+// Test provider connection
+app.post("/api/domain-providers/test", async (req, env) => {
+    try {
+        const { provider } = await req.json();
+        const config = await getProviderConfig(env);
+        const providerConfig = config[provider];
+        
+        if (!providerConfig || !providerConfig.enabled) {
+            return error('PROVIDER_NOT_ENABLED', 400);
+        }
+        
+        let testResult = false;
+        let testMessage = '';
+        
+        try {
+            if (provider === 'cloudflare') {
+                const headers = providerConfig.apiType === 'token'
+                    ? { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+                    : { 'X-Auth-Email': providerConfig.email, 'X-Auth-Key': providerConfig.apiKey, 'Content-Type': 'application/json' };
+                const resp = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', { headers });
+                const data = await resp.json();
+                testResult = data.success;
+                testMessage = data.success ? 'Connection successful' : (data.errors?.[0]?.message || 'Verification failed');
+            } else if (provider === 'porkbun') {
+                const resp = await fetch('https://api.porkbun.com/api/json/v3/ping', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ apikey: providerConfig.apiKey, secret: providerConfig.apiSecret })
+                });
+                const data = await resp.json();
+                testResult = data.status === 'SUCCESS';
+                testMessage = data.status === 'SUCCESS' ? 'Connection successful' : (data.message || 'Verification failed');
+            } else if (provider === 'dnshe') {
+                const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
+                    headers: { 'X-API-Key': providerConfig.apiKey, 'X-API-Secret': providerConfig.apiSecret, 'Content-Type': 'application/json' }
+                });
+                testResult = resp.ok;
+                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+            } else if (provider === 'digitalplat') {
+                const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains?per_page=1', {
+                    headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
+                });
+                testResult = resp.ok;
+                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+            }
+        } catch (err) {
+            testMessage = 'Connection error: ' + err.message;
+        }
+        
+        return response({ code: 200, data: { success: testResult, message: testMessage } });
+    } catch (error) {
+        return error('TEST_FAILED: ' + error.message, 500);
+    }
+});
+
 export default {
     async scheduled(event, env, ctx) {
         ctx.waitUntil(checkAndRenew(env, true));
