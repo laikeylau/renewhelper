@@ -1447,6 +1447,11 @@ const login = async () => {
 };
 const logout = () => { localStorage.removeItem('jwt_token'); isLoggedIn.value = false; password.value = ''; };
 const getAuth = () => ({ 'Authorization': 'Bearer ' + localStorage.getItem('jwt_token') });
+const refreshAfterDomainSync = async () => {
+    await fetchList();
+    tableKey.value++;
+    ElMessage.success(lang.value === 'zh' ? '域名列表已刷新' : 'Domain list refreshed');
+};
 const fetchList = async (tk) => {
     loading.value = true;
     try {
@@ -4821,7 +4826,7 @@ const openLink = (url) => { if (url) window.open(url, '_blank'); };
                 class="mecha-panel !rounded-none"
                 :close-on-click-modal="false"
             >
-                <DomainConfig />
+                <DomainConfig @synced="refreshAfterDomainSync" />
             </el-dialog>
 
             <!-- Renew Dialog (also used for Add History) -->

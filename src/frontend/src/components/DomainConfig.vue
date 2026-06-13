@@ -140,6 +140,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 
+const emit = defineEmits(['synced'])
+
 const providers = reactive({
   cloudflare: { enabled: false, apiKey: '', email: '', apiType: 'global' },
   porkbun: { enabled: false, apiKey: '', apiSecret: '' },
@@ -251,6 +253,7 @@ const syncDomains = async (provider) => {
     const data = await response.json()
     if (data.code === 200) {
       ElMessage.success('同步完成！导入 ' + data.data.synced + ' 个，跳过 ' + data.data.skipped + ' 个')
+      emit('synced', { provider, result: data.data })
     } else {
       ElMessage.error('同步失败: ' + data.msg)
     }
