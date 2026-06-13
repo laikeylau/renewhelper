@@ -20,7 +20,9 @@ const domainSyncMgr = {
     getProviderStatus(env) {
         return {
             cloudflare: { configured: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), type: env.CF_DOMAIN_API_TYPE || 'global' },
-            porkbun: { configured: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET) }
+            porkbun: { configured: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET) },
+            dnshe: { configured: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET) },
+            digitalplat: { configured: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET) }
         };
     },
     async syncCloudflare(env) {
@@ -49,6 +51,44 @@ const domainSyncMgr = {
         const data = await resp.json();
         if (data.status !== 'SUCCESS') throw new Error('Porkbun API error: ' + data.message);
         return Object.entries(data.domains || {}).map(([domain, info]) => ({ name: domain, expires: null }));
+    },
+    async syncDnshe(env) {
+        if (!env.DNSHE_API_KEY || !env.DNSHE_API_SECRET) throw new Error('DNSHE API not configured');
+        const headers = {
+            'X-API-Key': env.DNSHE_API_KEY,
+            'X-API-Secret': env.DNSHE_API_SECRET,
+            'Content-Type': 'application/json'
+        };
+        const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=500', { headers });
+        if (!resp.ok) throw new Error('DNSHE API error: ' + resp.status);
+        const data = await resp.json();
+        if (!data.success) throw new Error('DNSHE API error: ' + (data.message || 'Unknown error'));
+        return (data.subdomains || []).map(d => ({
+            name: d.full_domain || (d.subdomain + '.' + d.rootdomain),
+            id: d.id,
+            created_on: d.created_at,
+            expires_on: d.expires_at || null,
+            status: d.status
+        }));
+    },
+    async syncDigitalplat(env) {
+        if (!env.DIGITALPLAT_API_KEY || !env.DIGITALPLAT_API_SECRET) throw new Error('DigitalPlat API not configured');
+        const headers = {
+            'Authorization': 'Bearer ' + env.DIGITALPLAT_API_KEY,
+            'Content-Type': 'application/json'
+        };
+        const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains', { headers });
+        if (!resp.ok) throw new Error('DigitalPlat API error: ' + resp.status);
+        const data = await resp.json();
+        if (!data.success && !data.domains) throw new Error('DigitalPlat API error: ' + (data.message || 'Unknown error'));
+        const domains = data.domains || data.data || data.result || [];
+        return domains.map(d => ({
+            name: d.name || d.domain,
+            id: d.id,
+            created_on: d.created_at || d.registration_date,
+            expires_on: d.expires_at || d.expiration_date || null,
+            status: d.status || 'active'
+        }));
     },
     async importDomains(env, domains, provider) {
         const data = await env.RENEW_KV.get('items', { type: 'json' });
@@ -103,8 +143,28 @@ J.post('/api/sync-domains/porkbun', j(async (A, e) => {
     }
 }));
 
+J.post('/api/sync-domains/dnshe', j(async (A, e) => {
+    try {
+        const domains = await domainSyncMgr.syncDnshe(e);
+        const result = await domainSyncMgr.importDomains(e, domains, 'dnshe');
+        return K({ code: 200, data: result });
+    } catch (error) {
+        return S('SYNC_FAILED: ' + error.message, 500);
+    }
+}));
+
+J.post('/api/sync-domains/digitalplat', j(async (A, e) => {
+    try {
+        const domains = await domainSyncMgr.syncDigitalplat(e);
+        const result = await domainSyncMgr.importDomains(e, domains, 'digitalplat');
+        return K({ code: 200, data: result });
+    } catch (error) {
+        return S('SYNC_FAILED: ' + error.message, 500);
+    }
+}));
+
 J.post('/api/sync-domains/all', j(async (A, e) => {
-    const results = { cloudflare: null, porkbun: null, total: 0 };
+    const results = { cloudflare: null, porkbun: null, dnshe: null, digitalplat: null, total: 0 };
     const status = domainSyncMgr.getProviderStatus(e);
     if (status.cloudflare.configured) {
         try {
@@ -119,6 +179,20 @@ J.post('/api/sync-domains/all', j(async (A, e) => {
             results.porkbun = await domainSyncMgr.importDomains(e, domains, 'porkbun');
             results.total += results.porkbun.synced;
         } catch (err) { results.porkbun = { error: err.message }; }
+    }
+    if (status.dnshe.configured) {
+        try {
+            const domains = await domainSyncMgr.syncDnshe(e);
+            results.dnshe = await domainSyncMgr.importDomains(e, domains, 'dnshe');
+            results.total += results.dnshe.synced;
+        } catch (err) { results.dnshe = { error: err.message }; }
+    }
+    if (status.digitalplat.configured) {
+        try {
+            const domains = await domainSyncMgr.syncDigitalplat(e);
+            results.digitalplat = await domainSyncMgr.importDomains(e, domains, 'digitalplat');
+            results.total += results.digitalplat.synced;
+        } catch (err) { results.digitalplat = { error: err.message }; }
     }
     return K({ code: 200, data: results });
 }));
