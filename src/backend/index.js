@@ -2437,9 +2437,8 @@ async function syncDomainsFromProvider(env, provider) {
     }
     
     // Import domains
-    const data = await env.RENEW_KV.get('items', { type: 'json' });
-    const items = data?.items || [];
-    const version = data?.version || 0;
+    const currentPkg = await DataStore.getItemsPackage(env);
+    const items = currentPkg.items || [];
     const existing = new Set(items.filter(i => i.tags?.includes('Domain')).map(i => i.name.toLowerCase()));
     const imported = [], skipped = [];
     
@@ -2461,7 +2460,7 @@ async function syncDomainsFromProvider(env, provider) {
     }
     
     if (imported.length > 0) {
-        await env.RENEW_KV.put('items', JSON.stringify({ items: [...items, ...imported], version: version + 1 }));
+        await DataStore.saveItems(env, [...items, ...imported], null, true);
     }
     return { synced: imported.length, skipped: skipped.length };
 }
