@@ -17,16 +17,18 @@ jobs:
       - name: Inject secrets into wrangler.toml
         run: |
           # 替换 KV ID
-          sed -i 's/^\s*id = ""/id = "${{ secrets.CF_KV_ID }}"/' wrangler.toml
+          sed -i "s|id = \"\"|id = \"${{ secrets.CF_KV_ID }}\"|g" wrangler.toml
           
           # 替换 AUTH_PASSWORD
-          sed -i "s/AUTH_PASSWORD = \"admin\"/AUTH_PASSWORD = \"${{ secrets.AUTH_PASSWORD }}\"/" wrangler.toml
+          sed -i "s|AUTH_PASSWORD = \"admin\"|AUTH_PASSWORD = \"${{ secrets.AUTH_PASSWORD }}\"|g" wrangler.toml
           
           # 域名 API (可选) - 只在配置了才添加
           if [ -n "${{ secrets.CF_DOMAIN_API_KEY }}" ] && [ "${{ secrets.CF_DOMAIN_API_KEY }}" != "" ]; then
             echo "CF_DOMAIN_API_KEY = \"${{ secrets.CF_DOMAIN_API_KEY }}\"" >> wrangler.toml
             echo "CF_DOMAIN_EMAIL = \"${{ secrets.CF_DOMAIN_EMAIL }}\"" >> wrangler.toml
-            echo "CF_DOMAIN_API_TYPE = \"${{ secrets.CF_DOMAIN_API_TYPE || 'global' }}\"" >> wrangler.toml
+            CF_DOMAIN_API_TYPE=${{ secrets.CF_DOMAIN_API_TYPE }}
+            CF_DOMAIN_API_TYPE=${CF_DOMAIN_API_TYPE:-global}
+            echo "CF_DOMAIN_API_TYPE = \"$CF_DOMAIN_API_TYPE\"" >> wrangler.toml
           fi
           
           if [ -n "${{ secrets.PORKBUN_API_KEY }}" ] && [ "${{ secrets.PORKBUN_API_KEY }}" != "" ]; then
