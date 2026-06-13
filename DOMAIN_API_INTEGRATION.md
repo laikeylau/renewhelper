@@ -77,9 +77,9 @@ POST /api/sync-domains/all
 ### DigitalPlat
 
 1. 登录 [DigitalPlat Dashboard](https://dash.domain.digitalplat.org/)
-2. Dashboard -> API Keys
-3. Create API Key
-4. 保存 API Key 和 API Secret
+2. 获取可用的 API Secret / Token
+3. 如平台额外分配 API Key，可一并填写；若没有 API Key，可只填写 API Secret
 
-> 集成说明：服务端同步优先调用 `https://domain-api.digitalplat.org/api/v1`，并同时发送 API Key / API Secret。
+> 集成说明：服务端同步优先调用 `https://domain-api.digitalplat.org/api/v1`。
+> 当前实现会优先使用 API Key，没有时回退为仅使用 API Secret 进行 Bearer 认证，并同时发送 `X-API-Secret`。
 > 如果返回 `403` 或 Cloudflare challenge 页面，说明该接口当前被浏览器验证拦截，需要在提供商侧放行服务端 API 请求。

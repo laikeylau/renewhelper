@@ -2209,13 +2209,22 @@ function getDnsheHeaders(providerConfig) {
 }
 
 function getDigitalPlatHeaders(providerConfig) {
-    return {
-        'Authorization': 'Bearer ' + providerConfig.apiKey,
-        'X-API-Key': providerConfig.apiKey,
-        'X-API-Secret': providerConfig.apiSecret,
+    const bearerToken = providerConfig.apiKey || providerConfig.apiSecret || '';
+    const headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     };
+
+    if (bearerToken) {
+        headers['Authorization'] = 'Bearer ' + bearerToken;
+    }
+    if (providerConfig.apiKey) {
+        headers['X-API-Key'] = providerConfig.apiKey;
+    }
+    if (providerConfig.apiSecret) {
+        headers['X-API-Secret'] = providerConfig.apiSecret;
+    }
+    return headers;
 }
 
 async function safeReadJson(resp) {
@@ -2324,7 +2333,7 @@ function getEnvProviderConfig(env) {
         cloudflare: { enabled: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), apiKey: env.CF_DOMAIN_API_KEY || '', email: env.CF_DOMAIN_EMAIL || '', apiType: env.CF_DOMAIN_API_TYPE || 'global' },
         porkbun: { enabled: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET), apiKey: env.PORKBUN_API_KEY || '', apiSecret: env.PORKBUN_API_SECRET || '' },
         dnshe: { enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET), apiKey: env.DNSHE_API_KEY || '', apiSecret: env.DNSHE_API_SECRET || '' },
-        digitalplat: { enabled: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET), apiKey: env.DIGITALPLAT_API_KEY || '', apiSecret: env.DIGITALPLAT_API_SECRET || '' }
+        digitalplat: { enabled: !!(env.DIGITALPLAT_API_SECRET || env.DIGITALPLAT_API_KEY), apiKey: env.DIGITALPLAT_API_KEY || '', apiSecret: env.DIGITALPLAT_API_SECRET || '' }
     };
 }
 
@@ -2356,7 +2365,7 @@ app.get("/api/domain-providers", async (req, env) => {
             cloudflare: { configured: !!(config.cloudflare.enabled && config.cloudflare.apiKey && config.cloudflare.email), type: config.cloudflare.apiType || 'global' },
             porkbun: { configured: !!(config.porkbun.enabled && config.porkbun.apiKey && config.porkbun.apiSecret) },
             dnshe: { configured: !!(config.dnshe.enabled && config.dnshe.apiKey && config.dnshe.apiSecret) },
-            digitalplat: { configured: !!(config.digitalplat.enabled && config.digitalplat.apiKey && config.digitalplat.apiSecret) }
+            digitalplat: { configured: !!(config.digitalplat.enabled && (config.digitalplat.apiSecret || config.digitalplat.apiKey)) }
         }
     });
 });

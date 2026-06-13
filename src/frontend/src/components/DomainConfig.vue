@@ -116,11 +116,11 @@
       </div>
       <div v-if="providers.digitalplat.enabled" class="provider-form">
         <el-form label-position="top">
-          <el-form-item label="API Key">
-            <el-input v-model="providers.digitalplat.apiKey" placeholder="输入API Key" show-password @blur="saveProvider('digitalplat')"></el-input>
+          <el-form-item label="API Secret / Token">
+            <el-input v-model="providers.digitalplat.apiSecret" placeholder="输入 DigitalPlat API Secret" show-password @blur="saveProvider('digitalplat')"></el-input>
           </el-form-item>
-          <el-form-item label="API Secret">
-            <el-input v-model="providers.digitalplat.apiSecret" placeholder="输入API Secret" show-password @blur="saveProvider('digitalplat')"></el-input>
+          <el-form-item label="API Key（可选）">
+            <el-input v-model="providers.digitalplat.apiKey" placeholder="如提供商分配了 API Key 可填写，否则留空" show-password @blur="saveProvider('digitalplat')"></el-input>
           </el-form-item>
           <div class="provider-actions">
             <el-button size="small" type="primary" @click="testProvider('digitalplat')" :loading="testing === 'digitalplat'">
@@ -157,6 +157,9 @@ const isConfigured = (provider) => {
   if (!config.enabled) return false
   if (provider === 'cloudflare') {
     return !!(config.apiKey && config.email)
+  }
+  if (provider === 'digitalplat') {
+    return !!(config.apiSecret || config.apiKey)
   }
   return !!(config.apiKey && config.apiSecret)
 }
