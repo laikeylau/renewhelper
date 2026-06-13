@@ -38,6 +38,10 @@ AUTH_PASSWORD = "admin"
 # CF_DOMAIN_API_TYPE = "global"
 # PORKBUN_API_KEY = ""
 # PORKBUN_API_SECRET = ""
+# DNSHE_API_KEY = ""
+# DNSHE_API_SECRET = ""
+# DIGITALPLAT_API_KEY = ""
+# DIGITALPLAT_API_SECRET = ""
 ```
 
 ### 步骤 3：更新 GitHub Actions
@@ -52,6 +56,10 @@ secrets: |
   CF_DOMAIN_API_TYPE
   PORKBUN_API_KEY
   PORKBUN_API_SECRET
+  DNSHE_API_KEY
+  DNSHE_API_SECRET
+  DIGITALPLAT_API_KEY
+  DIGITALPLAT_API_SECRET
 ```
 
 ### 步骤 4：添加路由到 _worker.js
@@ -63,6 +71,8 @@ secrets: |
 router.get('/api/domain-providers', domainRoutes.getProviderStatus);
 router.post('/api/sync-domains/cloudflare', domainRoutes.syncCloudflare);
 router.post('/api/sync-domains/porkbun', domainRoutes.syncPorkbun);
+router.post('/api/sync-domains/dnshe', domainRoutes.syncDnshe);
+router.post('/api/sync-domains/digitalplat', domainRoutes.syncDigitalplat);
 router.post('/api/sync-domains/all', domainRoutes.syncAll);
 ```
 

@@ -15,6 +15,8 @@
 |--------|----------|----------|
 | Cloudflare | ✅ | Global API Key / Token API |
 | Porkbun | ✅ | API Key + Secret |
+| DNSHE | ✅ | API Key + Secret |
+| DigitalPlat | ✅ | API Key + Secret |
 
 ## 🚀 快速开始
 
@@ -51,6 +53,10 @@
    | `CF_DOMAIN_API_TYPE` | API 类型：`global` 或 `token` |
    | `PORKBUN_API_KEY` | Porkbun API Key |
    | `PORKBUN_API_SECRET` | Porkbun API Secret |
+   | `DNSHE_API_KEY` | DNSHE API Key |
+   | `DNSHE_API_SECRET` | DNSHE API Secret |
+   | `DIGITALPLAT_API_KEY` | DigitalPlat API Key |
+   | `DIGITALPLAT_API_SECRET` | DigitalPlat API Secret |
 
 4. **触发部署**
    - 进入 Actions 标签页
@@ -75,6 +81,18 @@
    - Account -> API Access
    - Enable API access
    - 复制 API Key 和 Secret
+
+   **DNSHE API：**
+   - 登录 [DNSHE Client Area](https://my.dnshe.com/)
+   - Free Domain Management -> API Management
+   - Create API Key
+   - 复制 API Key 和 API Secret
+
+   **DigitalPlat API：**
+   - 登录 [DigitalPlat Dashboard](https://dash.domain.digitalplat.org/)
+   - Dashboard -> API Keys
+   - Create API Key
+   - 复制 API Key 和 API Secret
 
 ### 方式二：Docker 部署
 
@@ -116,6 +134,12 @@ POST /api/sync-domains/cloudflare
 
 # 同步 Porkbun
 POST /api/sync-domains/porkbun
+
+# 同步 DNSHE
+POST /api/sync-domains/dnshe
+
+# 同步 DigitalPlat
+POST /api/sync-domains/digitalplat
 
 # 同步所有
 POST /api/sync-domains/all

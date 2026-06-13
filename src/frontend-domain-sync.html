@@ -10,7 +10,7 @@
   </div>
   
   <p style="margin: 0 0 16px 0; color: var(--el-text-color-secondary); font-size: 14px;">
-    从域名商 API 自动导入域名。支持 Cloudflare 和 Porkbun。
+    从域名商 API 自动导入域名。支持 Cloudflare、Porkbun、DNSHE 和 DigitalPlat。
   </p>
   
   <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
@@ -22,11 +22,21 @@
       <span id="pb-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc;"></span>
       Porkbun
     </div>
+    <div id="dnshe-status" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 13px; background: var(--el-fill-color-light);">
+      <span id="dnshe-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc;"></span>
+      DNSHE
+    </div>
+    <div id="dp-status" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 13px; background: var(--el-fill-color-light);">
+      <span id="dp-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc;"></span>
+      DigitalPlat
+    </div>
   </div>
   
   <div style="display: flex; gap: 12px; flex-wrap: wrap;">
     <button id="sync-cf-btn" onclick="syncDomains('cloudflare')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 Cloudflare</button>
     <button id="sync-pb-btn" onclick="syncDomains('porkbun')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 Porkbun</button>
+    <button id="sync-dnshe-btn" onclick="syncDomains('dnshe')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 DNSHE</button>
+    <button id="sync-dp-btn" onclick="syncDomains('digitalplat')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 DigitalPlat</button>
     <button id="sync-all-btn" onclick="syncDomains('all')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #67c23a; background: #67c23a; color: white; cursor: pointer;">同步所有</button>
   </div>
   
@@ -45,13 +55,19 @@ async function checkProviders() {
     if (data.code === 200) {
       const cf = data.data.cloudflare;
       const pb = data.data.porkbun;
+      const dnshe = data.data.dnshe;
+      const dp = data.data.digitalplat;
       
       document.getElementById('cf-dot').style.background = cf.configured ? '#67c23a' : '#c0c4cc';
       document.getElementById('pb-dot').style.background = pb.configured ? '#67c23a' : '#c0c4cc';
+      document.getElementById('dnshe-dot').style.background = dnshe.configured ? '#67c23a' : '#c0c4cc';
+      document.getElementById('dp-dot').style.background = dp.configured ? '#67c23a' : '#c0c4cc';
       
       document.getElementById('sync-cf-btn').disabled = !cf.configured;
       document.getElementById('sync-pb-btn').disabled = !pb.configured;
-      document.getElementById('sync-all-btn').disabled = !cf.configured && !pb.configured;
+      document.getElementById('sync-dnshe-btn').disabled = !dnshe.configured;
+      document.getElementById('sync-dp-btn').disabled = !dp.configured;
+      document.getElementById('sync-all-btn').disabled = !cf.configured && !pb.configured && !dnshe.configured && !dp.configured;
     }
   } catch (error) {
     console.error('Failed to check providers:', error);
@@ -86,7 +102,9 @@ async function syncDomains(provider) {
       if (provider === 'all') {
         const cfSynced = result.cloudflare?.synced || 0;
         const pbSynced = result.porkbun?.synced || 0;
-        message = '同步完成！Cloudflare: ' + cfSynced + ' 个, Porkbun: ' + pbSynced + ' 个';
+        const dnsheSynced = result.dnshe?.synced || 0;
+        const dpSynced = result.digitalplat?.synced || 0;
+        message = '同步完成！Cloudflare: ' + cfSynced + ' 个, Porkbun: ' + pbSynced + ' 个, DNSHE: ' + dnsheSynced + ' 个, DigitalPlat: ' + dpSynced + ' 个';
       } else {
         message = '同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个';
       }

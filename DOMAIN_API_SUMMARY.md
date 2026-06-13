@@ -8,6 +8,7 @@
 | `src/domain-api.js` | 域名 API 核心模块（Cloudflare + Porkbun） |
 | `src/domain-api-routes.js` | API 路由定义 |
 | `src/frontend-domain-sync.html` | 前端 UI 组件 |
+| `domain-api-routes.js` | 域名 API 路由（包含 DNSHE + DigitalPlat） |
 
 ### 配置文件
 | 文件 | 说明 |
@@ -49,6 +50,10 @@ CF_DOMAIN_EMAIL=Cloudflare邮箱
 CF_DOMAIN_API_TYPE=global  # 或 token
 PORKBUN_API_KEY=Porkbun API Key
 PORKBUN_API_SECRET=Porkbun API Secret
+DNSHE_API_KEY=DNSHE API Key
+DNSHE_API_SECRET=DNSHE API Secret
+DIGITALPLAT_API_KEY=DigitalPlat API Key
+DIGITALPLAT_API_SECRET=DigitalPlat API Secret
 ```
 
 4. 启用 Actions 并触发部署
@@ -68,6 +73,8 @@ docker compose up -d
 | `/api/domain-providers` | GET | 获取配置状态 |
 | `/api/sync-domains/cloudflare` | POST | 同步 Cloudflare 域名 |
 | `/api/sync-domains/porkbun` | POST | 同步 Porkbun 域名 |
+| `/api/sync-domains/dnshe` | POST | 同步 DNSHE 域名 |
+| `/api/sync-domains/digitalplat` | POST | 同步 DigitalPlat 域名 |
 | `/api/sync-domains/all` | POST | 同步所有域名商 |
 
 ## 🔑 API Key 获取
@@ -87,6 +94,18 @@ docker compose up -d
 
 1. 登录 https://porkbun.com/
 2. Account -> API Access -> Enable
+
+### DNSHE
+
+1. 登录 https://my.dnshe.com/
+2. Free Domain Management -> API Management
+3. Create API Key
+
+### DigitalPlat
+
+1. 登录 https://dash.domain.digitalplat.org/
+2. Dashboard -> API Keys
+3. Create API Key
 
 ## ⚠️ 注意事项
 

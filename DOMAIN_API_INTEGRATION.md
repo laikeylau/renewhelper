@@ -2,7 +2,7 @@
 
 ## 🎯 功能概述
 
-支持 Cloudflare 和 Porkbun 域名 API，自动导入域名到 RenewHelper。
+支持 Cloudflare、Porkbun、DNSHE 和 DigitalPlat 域名 API，自动导入域名到 RenewHelper。
 
 ### 支持的域名商
 
@@ -10,6 +10,8 @@
 |--------|----------|----------|
 | Cloudflare | ✅ | Global API Key 或 Token API |
 | Porkbun | ✅ | API Key + Secret |
+| DNSHE | ✅ | API Key + Secret |
+| DigitalPlat | ✅ | API Key + Secret |
 
 ## 🔧 环境变量
 
@@ -25,6 +27,10 @@
 | `CF_DOMAIN_API_TYPE` | ❌ | `global` 或 `token` |
 | `PORKBUN_API_KEY` | ❌ | Porkbun API Key |
 | `PORKBUN_API_SECRET` | ❌ | Porkbun API Secret |
+| `DNSHE_API_KEY` | ❌ | DNSHE API Key |
+| `DNSHE_API_SECRET` | ❌ | DNSHE API Secret |
+| `DIGITALPLAT_API_KEY` | ❌ | DigitalPlat API Key |
+| `DIGITALPLAT_API_SECRET` | ❌ | DigitalPlat API Secret |
 
 ## 📡 API 端点
 
@@ -39,6 +45,8 @@ GET /api/domain-providers
 ```
 POST /api/sync-domains/cloudflare
 POST /api/sync-domains/porkbun
+POST /api/sync-domains/dnshe
+POST /api/sync-domains/digitalplat
 POST /api/sync-domains/all
 ```
 
@@ -55,3 +63,17 @@ POST /api/sync-domains/all
 1. 登录 [Porkbun](https://porkbun.com/)
 2. Account -> API Access
 3. Enable API access
+
+### DNSHE
+
+1. 登录 [DNSHE Client Area](https://my.dnshe.com/)
+2. Free Domain Management -> API Management
+3. Create API Key
+4. 保存 API Key 和 API Secret
+
+### DigitalPlat
+
+1. 登录 [DigitalPlat Dashboard](https://dash.domain.digitalplat.org/)
+2. Dashboard -> API Keys
+3. Create API Key
+4. 保存 API Key 和 API Secret
