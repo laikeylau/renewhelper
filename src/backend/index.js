@@ -2208,23 +2208,70 @@ function getDnsheHeaders(providerConfig) {
     };
 }
 
-function getDigitalPlatHeaders(providerConfig) {
-    const bearerToken = providerConfig.apiKey || providerConfig.apiSecret || '';
-    const headers = {
+function getDigitalPlatHeaderVariants(providerConfig) {
+    const apiKey = providerConfig.apiKey || '';
+    const apiSecret = providerConfig.apiSecret || '';
+    const commonHeaders = {
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    };
+    const variants = [];
+
+    const pushVariant = (label, extraHeaders) => {
+        variants.push({ label, headers: { ...commonHeaders, ...extraHeaders } });
     };
 
-    if (bearerToken) {
-        headers['Authorization'] = 'Bearer ' + bearerToken;
+    if (apiSecret) {
+        pushVariant('bearer-secret', {
+            'Authorization': 'Bearer ' + apiSecret,
+            'X-API-Secret': apiSecret
+        });
+        pushVariant('token-secret', {
+            'Authorization': 'Token ' + apiSecret,
+            'X-API-Secret': apiSecret
+        });
+        pushVariant('x-api-token-secret', {
+            'X-API-Token': apiSecret,
+            'X-API-Secret': apiSecret
+        });
+        pushVariant('secret-only-header', {
+            'X-API-Secret': apiSecret,
+            'API-SECRET': apiSecret
+        });
     }
-    if (providerConfig.apiKey) {
-        headers['X-API-Key'] = providerConfig.apiKey;
+
+    if (apiKey && apiSecret) {
+        pushVariant('key-secret-headers', {
+            'X-API-Key': apiKey,
+            'X-API-Secret': apiSecret,
+            'API-KEY': apiKey,
+            'API-SECRET': apiSecret
+        });
+        pushVariant('bearer-key-with-secret', {
+            'Authorization': 'Bearer ' + apiKey,
+            'X-API-Key': apiKey,
+            'X-API-Secret': apiSecret
+        });
+        pushVariant('apikey-auth-with-secret', {
+            'Authorization': 'ApiKey ' + apiKey,
+            'X-API-Key': apiKey,
+            'X-API-Secret': apiSecret
+        });
+    } else if (apiKey) {
+        pushVariant('bearer-key', {
+            'Authorization': 'Bearer ' + apiKey,
+            'X-API-Key': apiKey
+        });
+        pushVariant('x-api-key-only', {
+            'X-API-Key': apiKey,
+            'API-KEY': apiKey
+        });
     }
-    if (providerConfig.apiSecret) {
-        headers['X-API-Secret'] = providerConfig.apiSecret;
-    }
-    return headers;
+
+    return variants;
 }
 
 async function safeReadJson(resp) {
@@ -2292,37 +2339,44 @@ async function fetchDnsheDomains(providerConfig) {
 
 async function fetchDigitalPlatDomains(providerConfig, perPage = 100) {
     const failures = [];
+    const headerVariants = getDigitalPlatHeaderVariants(providerConfig);
+
+    if (!headerVariants.length) {
+        throw new Error('DigitalPlat API not configured');
+    }
 
     for (const baseUrl of DIGITALPLAT_API_BASES) {
-        const resp = await fetch(`${baseUrl}/domains?per_page=${perPage}`, {
-            headers: getDigitalPlatHeaders(providerConfig)
-        });
-        const data = await safeReadJson(resp.clone());
+        for (const variant of headerVariants) {
+            const resp = await fetch(`${baseUrl}/domains?per_page=${perPage}`, {
+                headers: variant.headers
+            });
+            const data = await safeReadJson(resp.clone());
 
-        if (!resp.ok) {
-            failures.push(await describeProviderHttpError('DigitalPlat', resp));
-            continue;
+            if (!resp.ok) {
+                failures.push(`[${variant.label}] ${await describeProviderHttpError('DigitalPlat', resp)}`);
+                continue;
+            }
+            if (data?.success === false) {
+                failures.push(`[${variant.label}] DigitalPlat API error: ` + (data.message || data.error || 'Unknown'));
+                continue;
+            }
+
+            const domainList = Array.isArray(data)
+                ? data
+                : data?.domains || data?.data || data?.result || data?.items || [];
+
+            if (!Array.isArray(domainList)) {
+                failures.push(`[${variant.label}] DigitalPlat API error: unexpected response format from ${baseUrl}`);
+                continue;
+            }
+
+            return domainList.map((d) => ({
+                name: d.name || d.domain,
+                id: d.id,
+                created_on: d.created_at || d.registration_date,
+                expires_on: d.expires_at || d.expiration_date || null
+            })).filter((d) => d.name);
         }
-        if (data?.success === false) {
-            failures.push('DigitalPlat API error: ' + (data.message || data.error || 'Unknown'));
-            continue;
-        }
-
-        const domainList = Array.isArray(data)
-            ? data
-            : data?.domains || data?.data || data?.result || data?.items || [];
-
-        if (!Array.isArray(domainList)) {
-            failures.push(`DigitalPlat API error: unexpected response format from ${baseUrl}`);
-            continue;
-        }
-
-        return domainList.map((d) => ({
-            name: d.name || d.domain,
-            id: d.id,
-            created_on: d.created_at || d.registration_date,
-            expires_on: d.expires_at || d.expiration_date || null
-        })).filter((d) => d.name);
     }
 
     throw new Error(failures.join(' | ') || 'DigitalPlat API request failed');
