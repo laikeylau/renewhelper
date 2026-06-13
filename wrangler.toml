@@ -10,20 +10,22 @@ name = "renewhelper"
 name = "renewhelper-staging"
 
 # 绑定 KV 数据库
-# 注意：在一键部署过程中，Cloudflare 会提示您创建一个新的 KV 并自动填充 ID
 [[kv_namespaces]]
 binding = "RENEW_KV"
-id = ""  # 本地开发占位符。部署前请运行 `npx wrangler kv:namespace create RENEW_KV` 并填入真实 ID
+id = ""
 preview_id = ""
 
-# 设置定时任务 (Cron Triggers)
-# 这里设置每 30 分钟检查一次 (0,30 * * * *)
-# 必须设置这个，否则自动续期和通知功能无法触发
+# 定时任务
 [triggers]
 crons = ["0,30 * * * *"]
 
-# 环境变量默认值 (可选)
-# 部署时通常会提示用户输入，这里作为默认值
+# 环境变量
 [vars]
 AUTH_PASSWORD = "admin"
 
+# 域名 API 配置 (可选)
+# CF_DOMAIN_API_KEY = ""
+# CF_DOMAIN_EMAIL = ""
+# CF_DOMAIN_API_TYPE = "global"
+# PORKBUN_API_KEY = ""
+# PORKBUN_API_SECRET = ""

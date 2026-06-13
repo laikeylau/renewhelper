@@ -1,0 +1,110 @@
+<!--
+  域名同步 UI 组件
+  添加到 RenewHelper 设置页面
+-->
+
+<div class="domain-sync-section" style="margin-top: 24px; padding: 20px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+    <span style="font-size: 20px;">🌐</span>
+    <h3 style="margin: 0; font-size: 16px; font-weight: 600;">域名同步 (Domain Sync)</h3>
+  </div>
+  
+  <p style="margin: 0 0 16px 0; color: var(--el-text-color-secondary); font-size: 14px;">
+    从域名商 API 自动导入域名。支持 Cloudflare 和 Porkbun。
+  </p>
+  
+  <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+    <div id="cf-status" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 13px; background: var(--el-fill-color-light);">
+      <span id="cf-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc;"></span>
+      Cloudflare
+    </div>
+    <div id="pb-status" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 16px; font-size: 13px; background: var(--el-fill-color-light);">
+      <span id="pb-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc;"></span>
+      Porkbun
+    </div>
+  </div>
+  
+  <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+    <button id="sync-cf-btn" onclick="syncDomains('cloudflare')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 Cloudflare</button>
+    <button id="sync-pb-btn" onclick="syncDomains('porkbun')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #409eff; background: #409eff; color: white; cursor: pointer;">同步 Porkbun</button>
+    <button id="sync-all-btn" onclick="syncDomains('all')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #67c23a; background: #67c23a; color: white; cursor: pointer;">同步所有</button>
+  </div>
+  
+  <div id="sync-result" style="display: none; margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 14px;"></div>
+</div>
+
+<script>
+async function checkProviders() {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await response.json();
+    
+    if (data.code === 200) {
+      const cf = data.data.cloudflare;
+      const pb = data.data.porkbun;
+      
+      document.getElementById('cf-dot').style.background = cf.configured ? '#67c23a' : '#c0c4cc';
+      document.getElementById('pb-dot').style.background = pb.configured ? '#67c23a' : '#c0c4cc';
+      
+      document.getElementById('sync-cf-btn').disabled = !cf.configured;
+      document.getElementById('sync-pb-btn').disabled = !pb.configured;
+      document.getElementById('sync-all-btn').disabled = !cf.configured && !pb.configured;
+    }
+  } catch (error) {
+    console.error('Failed to check providers:', error);
+  }
+}
+
+async function syncDomains(provider) {
+  const resultEl = document.getElementById('sync-result');
+  resultEl.style.display = 'block';
+  resultEl.style.background = 'rgba(64, 158, 255, 0.1)';
+  resultEl.style.border = '1px solid rgba(64, 158, 255, 0.3)';
+  resultEl.textContent = '正在同步...';
+  
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const endpoint = provider === 'all' ? '/api/sync-domains/all' : '/api/sync-domains/' + provider;
+    
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const data = await response.json();
+    
+    if (data.code === 200) {
+      const result = data.data;
+      let message = '';
+      
+      if (provider === 'all') {
+        const cfSynced = result.cloudflare?.synced || 0;
+        const pbSynced = result.porkbun?.synced || 0;
+        message = '同步完成！Cloudflare: ' + cfSynced + ' 个, Porkbun: ' + pbSynced + ' 个';
+      } else {
+        message = '同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个';
+      }
+      
+      resultEl.style.background = 'rgba(103, 194, 58, 0.1)';
+      resultEl.style.border = '1px solid rgba(103, 194, 58, 0.3)';
+      resultEl.textContent = message;
+      
+      setTimeout(function() { location.reload(); }, 2000);
+    } else {
+      throw new Error(data.msg);
+    }
+  } catch (error) {
+    resultEl.style.background = 'rgba(245, 108, 108, 0.1)';
+    resultEl.style.border = '1px solid rgba(245, 108, 108, 0.3)';
+    resultEl.textContent = '同步失败: ' + error.message;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', checkProviders);
+</script>
