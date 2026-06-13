@@ -170,17 +170,12 @@ const loadConfig = async () => {
     const data = await response.json()
     
     if (data.code === 200) {
-      // Note: secrets are masked in the response
+      // Keep masked secrets in local state so later saves won't overwrite them with blanks.
       Object.keys(data.data).forEach(provider => {
         if (providers[provider]) {
-          // Only update non-masked fields
           const config = data.data[provider]
-          if (config.apiKey && !config.apiKey.includes('***')) {
-            providers[provider].apiKey = config.apiKey
-          }
-          if (config.apiSecret && !config.apiSecret.includes('***')) {
-            providers[provider].apiSecret = config.apiSecret
-          }
+          providers[provider].apiKey = config.apiKey || ''
+          providers[provider].apiSecret = config.apiSecret || ''
           providers[provider].email = config.email || ''
           providers[provider].apiType = config.apiType || 'global'
           providers[provider].enabled = config.enabled || false

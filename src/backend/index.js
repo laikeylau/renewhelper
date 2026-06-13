@@ -2319,15 +2319,33 @@ async function fetchDigitalPlatDomains(providerConfig, perPage = 100) {
     throw new Error(failures.join(' | ') || 'DigitalPlat API request failed');
 }
 
-async function getProviderConfig(env) {
-    const kvConfig = await env.RENEW_KV.get(DOMAIN_PROVIDERS_KV_KEY, { type: 'json' });
-    if (kvConfig) return kvConfig;
+function getEnvProviderConfig(env) {
     return {
         cloudflare: { enabled: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), apiKey: env.CF_DOMAIN_API_KEY || '', email: env.CF_DOMAIN_EMAIL || '', apiType: env.CF_DOMAIN_API_TYPE || 'global' },
         porkbun: { enabled: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET), apiKey: env.PORKBUN_API_KEY || '', apiSecret: env.PORKBUN_API_SECRET || '' },
         dnshe: { enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET), apiKey: env.DNSHE_API_KEY || '', apiSecret: env.DNSHE_API_SECRET || '' },
         digitalplat: { enabled: !!(env.DIGITALPLAT_API_KEY && env.DIGITALPLAT_API_SECRET), apiKey: env.DIGITALPLAT_API_KEY || '', apiSecret: env.DIGITALPLAT_API_SECRET || '' }
     };
+}
+
+async function getProviderConfig(env) {
+    const envConfig = getEnvProviderConfig(env);
+    const kvConfig = await env.RENEW_KV.get(DOMAIN_PROVIDERS_KV_KEY, { type: 'json' });
+    if (!kvConfig) return envConfig;
+
+    const merged = { ...envConfig };
+    for (const provider of Object.keys(merged)) {
+        const kvProvider = kvConfig[provider] || {};
+        merged[provider] = {
+            ...merged[provider],
+            ...kvProvider,
+            apiKey: kvProvider.apiKey || merged[provider].apiKey || '',
+            apiSecret: kvProvider.apiSecret || merged[provider].apiSecret || '',
+            email: kvProvider.email || merged[provider].email || '',
+            apiType: kvProvider.apiType || merged[provider].apiType || 'global'
+        };
+    }
+    return merged;
 }
 
 // Get provider status
@@ -2364,10 +2382,10 @@ app.post("/api/domain-providers/config", async (req, env) => {
         
         for (const [provider, settings] of Object.entries(newConfig)) {
             if (mergedConfig[provider]) {
-                if (settings.apiKey !== undefined && !settings.apiKey.endsWith('***')) {
+                if (settings.apiKey !== undefined && settings.apiKey !== '' && !settings.apiKey.endsWith('***')) {
                     mergedConfig[provider].apiKey = settings.apiKey;
                 }
-                if (settings.apiSecret !== undefined && !settings.apiSecret.endsWith('***')) {
+                if (settings.apiSecret !== undefined && settings.apiSecret !== '' && !settings.apiSecret.endsWith('***')) {
                     mergedConfig[provider].apiSecret = settings.apiSecret;
                 }
                 if (settings.email !== undefined) mergedConfig[provider].email = settings.email;
