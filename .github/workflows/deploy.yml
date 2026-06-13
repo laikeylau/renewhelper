@@ -24,10 +24,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          secretsFilter: |
-            AUTH_PASSWORD
-            CF_DOMAIN_API_KEY
-            CF_DOMAIN_EMAIL
-            CF_DOMAIN_API_TYPE
-            PORKBUN_API_KEY
-            PORKBUN_API_SECRET
+        env:
+          AUTH_PASSWORD: ${{ secrets.AUTH_PASSWORD }}
+          CF_DOMAIN_API_KEY: ${{ secrets.CF_DOMAIN_API_KEY }}
+          CF_DOMAIN_EMAIL: ${{ secrets.CF_DOMAIN_EMAIL }}
+          CF_DOMAIN_API_TYPE: ${{ secrets.CF_DOMAIN_API_TYPE }}
+          PORKBUN_API_KEY: ${{ secrets.PORKBUN_API_KEY }}
+          PORKBUN_API_SECRET: ${{ secrets.PORKBUN_API_SECRET }}
