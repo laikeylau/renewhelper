@@ -106,23 +106,136 @@ const domainSyncMgr = {
     async syncDigitalplat(env) {
         const config = await getProviderConfig(env);
         const { apiKey, apiSecret, enabled } = config.digitalplat;
-        if (!enabled || !apiKey || !apiSecret) throw new Error('DigitalPlat API not configured');
-        const headers = {
-            'Authorization': 'Bearer ' + apiKey,
-            'Content-Type': 'application/json'
-        };
-        const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains', { headers });
-        if (!resp.ok) throw new Error('DigitalPlat API error: ' + resp.status);
-        const data = await resp.json();
-        if (!data.success && !data.domains) throw new Error('DigitalPlat API error: ' + (data.message || 'Unknown error'));
-        const domains = data.domains || data.data || data.result || [];
-        return domains.map(d => ({
-            name: d.name || d.domain,
-            id: d.id,
-            created_on: d.created_at || d.registration_date,
-            expires_on: d.expires_at || d.expiration_date || null,
-            status: d.status || 'active'
-        }));
+        if (!enabled || (!apiKey && !apiSecret)) throw new Error('DigitalPlat API not configured');
+        
+        // Multiple API endpoints to try
+        const apiEndpoints = [
+            'https://dash.domain.digitalplat.org/api/v1',
+            'https://domain-api.digitalplat.org/api/v1'
+        ];
+        
+        // Multiple authentication methods to try
+        const authMethods = [
+            // Method 1: Bearer token with apiSecret
+            () => ({
+                name: 'Bearer + Secret',
+                headers: {
+                    'Authorization': 'Bearer ' + (apiSecret || apiKey),
+                    'X-API-Secret': apiSecret || '',
+                    'Content-Type': 'application/json'
+                }
+            }),
+            // Method 2: X-API-Key + X-API-Secret headers
+            () => ({
+                name: 'API Key + Secret Headers',
+                headers: {
+                    'X-API-Key': apiKey || '',
+                    'X-API-Secret': apiSecret || '',
+                    'Content-Type': 'application/json'
+                }
+            }),
+            // Method 3: Token authentication
+            () => ({
+                name: 'Token Auth',
+                headers: {
+                    'Authorization': 'Token ' + (apiSecret || apiKey),
+                    'X-API-Secret': apiSecret || '',
+                    'Content-Type': 'application/json'
+                }
+            }),
+            // Method 4: ApiKey authentication
+            () => ({
+                name: 'ApiKey Auth',
+                headers: {
+                    'Authorization': 'ApiKey ' + apiKey,
+                    'X-API-Secret': apiSecret || '',
+                    'Content-Type': 'application/json'
+                }
+            })
+        ];
+        
+        const errors = [];
+        
+        // Try each endpoint with each auth method
+        for (const endpoint of apiEndpoints) {
+            for (const getAuth of authMethods) {
+                const auth = getAuth();
+                try {
+                    console.log(`[DigitalPlat] Trying ${endpoint} with ${auth.name}`);
+                    
+                    const resp = await fetch(`${endpoint}/domains?per_page=100`, {
+                        headers: auth.headers,
+                        cf: { cacheTtl: 5 } // Disable caching
+                    });
+                    
+                    const contentType = resp.headers.get('content-type') || '';
+                    const body = await resp.text();
+                    
+                    // Check for Cloudflare Challenge
+                    if (body.includes('Just a moment') || body.includes('cf-chl') || body.includes('challenge-platform')) {
+                        const error = `${endpoint} (${auth.name}): Blocked by Cloudflare Challenge`;
+                        console.log(`[DigitalPlat] ${error}`);
+                        errors.push(error);
+                        continue;
+                    }
+                    
+                    // Check for HTML response
+                    if (contentType.includes('text/html') || body.trim().startsWith('<!DOCTYPE') || body.trim().startsWith('<html')) {
+                        const error = `${endpoint} (${auth.name}): Received HTML instead of JSON`;
+                        console.log(`[DigitalPlat] ${error}`);
+                        errors.push(error);
+                        continue;
+                    }
+                    
+                    if (!resp.ok) {
+                        const error = `${endpoint} (${auth.name}): HTTP ${resp.status}`;
+                        console.log(`[DigitalPlat] ${error}`);
+                        errors.push(error);
+                        continue;
+                    }
+                    
+                    // Try to parse JSON
+                    let data;
+                    try {
+                        data = JSON.parse(body);
+                    } catch (parseError) {
+                        const error = `${endpoint} (${auth.name}): JSON parse error`;
+                        console.log(`[DigitalPlat] ${error}`);
+                        errors.push(error);
+                        continue;
+                    }
+                    
+                    // Check for API error response
+                    if (data.success === false || data.error) {
+                        const error = `${endpoint} (${auth.name}): API error - ${data.message || data.error || 'Unknown'}`;
+                        console.log(`[DigitalPlat] ${error}`);
+                        errors.push(error);
+                        continue;
+                    }
+                    
+                    // Success! Parse domains
+                    const domains = data.domains || data.data || data.result || data.items || (Array.isArray(data) ? data : []);
+                    
+                    console.log(`[DigitalPlat] Success! Found ${domains.length} domains using ${endpoint} with ${auth.name}`);
+                    
+                    return domains.map(d => ({
+                        name: d.name || d.domain,
+                        id: d.id,
+                        created_on: d.created_at || d.registration_date,
+                        expires_on: d.expires_at || d.expiration_date || null,
+                        status: d.status || 'active'
+                    }));
+                    
+                } catch (fetchError) {
+                    const error = `${endpoint} (${auth.name}): ${fetchError.message}`;
+                    console.log(`[DigitalPlat] ${error}`);
+                    errors.push(error);
+                }
+            }
+        }
+        
+        // All attempts failed
+        throw new Error('DigitalPlat API failed: ' + errors.join(' | '));
     },
     async importDomains(env, domains, provider) {
         const data = await env.RENEW_KV.get('items', { type: 'json' });
@@ -248,11 +361,59 @@ J.post('/api/domain-providers/test', j(async (A, e) => {
                 testResult = resp.ok;
                 testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
             } else if (provider === 'digitalplat') {
-                const resp = await fetch('https://dash.domain.digitalplat.org/api/v1/domains?per_page=1', {
-                    headers: { 'Authorization': 'Bearer ' + providerConfig.apiKey, 'Content-Type': 'application/json' }
-                });
-                testResult = resp.ok;
-                testMessage = resp.ok ? 'Connection successful' : 'API key invalid';
+                // Try multiple endpoints and auth methods for DigitalPlat
+                const endpoints = [
+                    'https://dash.domain.digitalplat.org/api/v1',
+                    'https://domain-api.digitalplat.org/api/v1'
+                ];
+                const authMethods = [
+                    // Method 1: Bearer with apiSecret
+                    { name: 'Bearer+Secret', headers: { 'Authorization': 'Bearer ' + (providerConfig.apiSecret || providerConfig.apiKey), 'X-API-Secret': providerConfig.apiSecret || '', 'Content-Type': 'application/json' } },
+                    // Method 2: API Key + Secret headers
+                    { name: 'Key+Secret Headers', headers: { 'X-API-Key': providerConfig.apiKey || '', 'X-API-Secret': providerConfig.apiSecret || '', 'Content-Type': 'application/json' } },
+                    // Method 3: Token auth
+                    { name: 'Token Auth', headers: { 'Authorization': 'Token ' + (providerConfig.apiSecret || providerConfig.apiKey), 'X-API-Secret': providerConfig.apiSecret || '', 'Content-Type': 'application/json' } }
+                ];
+                
+                const errors = [];
+                let success = false;
+                
+                for (const endpoint of endpoints) {
+                    for (const auth of authMethods) {
+                        try {
+                            const resp = await fetch(`${endpoint}/domains?per_page=1`, { headers: auth.headers });
+                            const body = await resp.text();
+                            
+                            // Check for Cloudflare Challenge
+                            if (body.includes('Just a moment') || body.includes('cf-chl') || body.includes('challenge-platform')) {
+                                errors.push(`${endpoint} (${auth.name}): Cloudflare Challenge blocked`);
+                                continue;
+                            }
+                            
+                            // Check for HTML response
+                            if (body.trim().startsWith('<!DOCTYPE') || body.trim().startsWith('<html')) {
+                                errors.push(`${endpoint} (${auth.name}): HTML response received`);
+                                continue;
+                            }
+                            
+                            if (resp.ok) {
+                                testResult = true;
+                                testMessage = `Connection successful (${endpoint}, ${auth.name})`;
+                                success = true;
+                                break;
+                            } else {
+                                errors.push(`${endpoint} (${auth.name}): HTTP ${resp.status}`);
+                            }
+                        } catch (e) {
+                            errors.push(`${endpoint} (${auth.name}): ${e.message}`);
+                        }
+                    }
+                    if (success) break;
+                }
+                
+                if (!success) {
+                    testMessage = 'All endpoints failed: ' + errors.join(' | ');
+                }
             }
         } catch (err) {
             testMessage = 'Connection error: ' + err.message;
