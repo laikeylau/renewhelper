@@ -803,44 +803,85 @@ app.post("/api/import", async (req, env) => {
         const items = data.items || [];
         const settings = data.settings || {};
         
+        let itemsImported = 0;
+        let settingsImported = false;
+        
         // Merge settings (don't overwrite JWT secret)
         if (Object.keys(settings).length > 0) {
-            const currentSettings = await DataStore.getSettings(env);
-            const mergedSettings = { ...settings };
-            // Keep the current JWT secret
-            if (currentSettings.jwtSecret) {
-                mergedSettings.jwtSecret = currentSettings.jwtSecret;
+            try {
+                const currentSettings = await DataStore.getSettings(env);
+                const mergedSettings = { ...currentSettings };
+                
+                // Copy settings fields except jwtSecret
+                for (const [key, value] of Object.entries(settings)) {
+                    if (key !== 'jwtSecret') {
+                        mergedSettings[key] = value;
+                    }
+                }
+                
+                await env.RENEW_KV.put('settings', JSON.stringify(mergedSettings));
+                settingsImported = true;
+            } catch (err) {
+                console.error('Settings import error:', err);
             }
-            // Ensure channels array is properly handled
-            if (settings.channels && Array.isArray(settings.channels)) {
-                mergedSettings.channels = settings.channels;
-            }
-            await DataStore.saveSettings(env, mergedSettings);
         }
         
         // Import items
         if (items.length > 0) {
-            // Get existing items to merge
-            const existingItems = await DataStore.getItems(env);
-            const existingIds = new Set(existingItems.map(i => i.id));
-            
-            // Merge: keep existing items, add new ones
-            const mergedItems = [...existingItems];
-            for (const item of items) {
-                if (!existingIds.has(item.id)) {
-                    mergedItems.push(item);
+            try {
+                // Get existing items
+                const existingData = await env.RENEW_KV.get('items', { type: 'json' });
+                const existingItems = existingData?.items || [];
+                const existingIds = new Set(existingItems.map(i => i.id));
+                
+                // Add new items (skip duplicates)
+                const newItems = [];
+                for (const item of items) {
+                    if (item && item.id && !existingIds.has(item.id)) {
+                        // Ensure required fields
+                        const cleanItem = {
+                            id: item.id,
+                            name: item.name || '',
+                            tags: item.tags || [],
+                            type: item.type || 'reset',
+                            enabled: item.enabled !== false,
+                            createDate: item.createDate || item.create_date || new Date().toISOString().split('T')[0],
+                            lastRenewDate: item.lastRenewDate || item.last_renew_date || item.createDate || new Date().toISOString().split('T')[0],
+                            intervalDays: item.intervalDays || 365,
+                            cycleUnit: item.cycleUnit || 'year',
+                            notifyDays: item.notifyDays || 30,
+                            notifyTime: item.notifyTime || '09:00',
+                            autoRenew: item.autoRenew || false,
+                            message: item.message || '',
+                            fixedPrice: item.fixedPrice || 0,
+                            currency: item.currency || 'USD',
+                            notifyTimes: item.notifyTimes || ['09:00'],
+                            notifyChannelIds: item.notifyChannelIds || [],
+                            renewHistory: item.renewHistory || [],
+                            renewUrl: item.renewUrl || ''
+                        };
+                        newItems.push(cleanItem);
+                    }
                 }
+                
+                if (newItems.length > 0) {
+                    const mergedItems = [...existingItems, ...newItems];
+                    const version = (existingData?.version || 0) + 1;
+                    await env.RENEW_KV.put('items', JSON.stringify({ items: mergedItems, version }));
+                    itemsImported = newItems.length;
+                }
+            } catch (err) {
+                console.error('Items import error:', err);
+                throw err;
             }
-            
-            await DataStore.saveItems(env, mergedItems);
         }
         
         return response({ 
             code: 200, 
             msg: 'IMPORT_SUCCESS',
             data: {
-                itemsImported: items.length,
-                settingsImported: Object.keys(settings).length > 0
+                itemsImported,
+                settingsImported
             }
         });
     } catch (err) {
