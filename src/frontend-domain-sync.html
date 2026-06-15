@@ -75,14 +75,16 @@ async function checkProviders() {
       
       document.getElementById('cf-dot').style.background = cf.configured ? '#67c23a' : '#c0c4cc';
       document.getElementById('pb-dot').style.background = pb.configured ? '#67c23a' : '#c0c4cc';
-      document.getElementById('dnshe-dot').style.background = dnshe.configured ? '#67c23a' : '#c0c4cc';
+      // DNSHE: show as configured if any account is configured
+      const dnsheConfigured = dnshe.configured || (dnshe.accounts && dnshe.accounts.some(a => a.configured));
+      document.getElementById('dnshe-dot').style.background = dnsheConfigured ? '#67c23a' : '#c0c4cc';
       document.getElementById('dp-dot').style.background = dp.configured ? '#67c23a' : '#c0c4cc';
       
       document.getElementById('sync-cf-btn').disabled = !cf.configured;
       document.getElementById('sync-pb-btn').disabled = !pb.configured;
-      document.getElementById('sync-dnshe-btn').disabled = !dnshe.configured;
+      document.getElementById('sync-dnshe-btn').disabled = !dnsheConfigured;
       document.getElementById('sync-dp-btn').disabled = !dp.configured;
-      document.getElementById('sync-all-btn').disabled = !cf.configured && !pb.configured && !dnshe.configured && !dp.configured;
+      document.getElementById('sync-all-btn').disabled = !cf.configured && !pb.configured && !dnsheConfigured && !dp.configured;
     }
   } catch (error) {
     console.error('Failed to check providers:', error);
@@ -119,7 +121,22 @@ async function syncDomains(provider) {
         const pbSynced = result.porkbun?.synced || 0;
         const dnsheSynced = result.dnshe?.synced || 0;
         const dpSynced = result.digitalplat?.synced || 0;
-        message = '同步完成！Cloudflare: ' + cfSynced + ' 个, Porkbun: ' + pbSynced + ' 个, DNSHE: ' + dnsheSynced + ' 个, DigitalPlat: ' + dpSynced + ' 个';
+        
+        message = '同步完成！';
+        if (cfSynced > 0) message += ' Cloudflare: ' + cfSynced + ' 个,';
+        if (pbSynced > 0) message += ' Porkbun: ' + pbSynced + ' 个,';
+        if (dnsheSynced > 0) message += ' DNSHE: ' + dnsheSynced + ' 个,';
+        if (dpSynced > 0) message += ' DigitalPlat: ' + dpSynced + ' 个';
+        
+        // Remove trailing comma
+        message = message.replace(/,$/, '');
+        
+        if (result.total === 0) {
+          message = '没有新的域名需要同步';
+        }
+      } else if (provider === 'dnshe' && result.accounts) {
+        // Show DNSHE account details
+        message = 'DNSHE 同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个';
       } else {
         message = '同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个';
       }

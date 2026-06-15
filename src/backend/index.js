@@ -2382,11 +2382,31 @@ async function fetchDigitalPlatDomains(providerConfig, perPage = 100) {
     throw new Error(failures.join(' | ') || 'DigitalPlat API request failed');
 }
 
+// Helper: Check if DNSHE has any configured accounts
+function hasDnsheAccounts(config) {
+    if (!Array.isArray(config.dnshe)) return false;
+    return config.dnshe.some(acc => acc.enabled && acc.apiKey && acc.apiSecret);
+}
+
+// Helper: Get all enabled DNSHE accounts
+function getEnabledDnsheAccounts(config) {
+    if (!Array.isArray(config.dnshe)) return [];
+    return config.dnshe.filter(acc => acc.enabled && acc.apiKey && acc.apiSecret);
+}
+
 function getEnvProviderConfig(env) {
     return {
         cloudflare: { enabled: !!(env.CF_DOMAIN_API_KEY && env.CF_DOMAIN_EMAIL), apiKey: env.CF_DOMAIN_API_KEY || '', email: env.CF_DOMAIN_EMAIL || '', apiType: env.CF_DOMAIN_API_TYPE || 'global' },
         porkbun: { enabled: !!(env.PORKBUN_API_KEY && env.PORKBUN_API_SECRET), apiKey: env.PORKBUN_API_KEY || '', apiSecret: env.PORKBUN_API_SECRET || '' },
-        dnshe: { enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET), apiKey: env.DNSHE_API_KEY || '', apiSecret: env.DNSHE_API_SECRET || '' },
+        dnshe: [
+            {
+                id: 'default',
+                name: 'Default',
+                enabled: !!(env.DNSHE_API_KEY && env.DNSHE_API_SECRET),
+                apiKey: env.DNSHE_API_KEY || '',
+                apiSecret: env.DNSHE_API_SECRET || ''
+            }
+        ],
         digitalplat: { enabled: !!(env.DIGITALPLAT_API_SECRET || env.DIGITALPLAT_API_KEY), apiKey: env.DIGITALPLAT_API_KEY || '', apiSecret: env.DIGITALPLAT_API_SECRET || '' }
     };
 }
@@ -2398,15 +2418,26 @@ async function getProviderConfig(env) {
 
     const merged = { ...envConfig };
     for (const provider of Object.keys(merged)) {
-        const kvProvider = kvConfig[provider] || {};
-        merged[provider] = {
-            ...merged[provider],
-            ...kvProvider,
-            apiKey: kvProvider.apiKey || merged[provider].apiKey || '',
-            apiSecret: kvProvider.apiSecret || merged[provider].apiSecret || '',
-            email: kvProvider.email || merged[provider].email || '',
-            apiType: kvProvider.apiType || merged[provider].apiType || 'global'
-        };
+        if (provider === 'dnshe') {
+            // DNSHE is an array - handle specially
+            if (Array.isArray(kvConfig.dnshe)) {
+                merged.dnshe = kvConfig.dnshe;
+            } else if (kvConfig.dnshe && typeof kvConfig.dnshe === 'object') {
+                // Migrate old single object format to array
+                merged.dnshe = kvConfig.dnshe.apiKey ? [kvConfig.dnshe] : [];
+            }
+            // else keep envConfig default
+        } else {
+            const kvProvider = kvConfig[provider] || {};
+            merged[provider] = {
+                ...merged[provider],
+                ...kvProvider,
+                apiKey: kvProvider.apiKey || merged[provider].apiKey || '',
+                apiSecret: kvProvider.apiSecret || merged[provider].apiSecret || '',
+                email: kvProvider.email || merged[provider].email || '',
+                apiType: kvProvider.apiType || merged[provider].apiType || 'global'
+            };
+        }
     }
     return merged;
 }
@@ -2418,7 +2449,14 @@ app.get("/api/domain-providers", async (req, env) => {
         code: 200, data: {
             cloudflare: { configured: !!(config.cloudflare.enabled && config.cloudflare.apiKey && config.cloudflare.email), type: config.cloudflare.apiType || 'global' },
             porkbun: { configured: !!(config.porkbun.enabled && config.porkbun.apiKey && config.porkbun.apiSecret) },
-            dnshe: { configured: !!(config.dnshe.enabled && config.dnshe.apiKey && config.dnshe.apiSecret) },
+            dnshe: {
+                configured: hasDnsheAccounts(config),
+                accounts: (config.dnshe || []).map(acc => ({
+                    id: acc.id,
+                    name: acc.name,
+                    configured: !!(acc.enabled && acc.apiKey && acc.apiSecret)
+                }))
+            },
             digitalplat: { configured: !!(config.digitalplat.enabled && (config.digitalplat.apiSecret || config.digitalplat.apiKey)) }
         }
     });
@@ -2444,6 +2482,10 @@ app.post("/api/domain-providers/config", async (req, env) => {
         const mergedConfig = { ...currentConfig };
         
         for (const [provider, settings] of Object.entries(newConfig)) {
+            if (provider === 'dnshe') {
+                // DNSHE is handled separately via account endpoints
+                continue;
+            }
             if (mergedConfig[provider]) {
                 if (settings.apiKey !== undefined && settings.apiKey !== '' && !settings.apiKey.endsWith('***')) {
                     mergedConfig[provider].apiKey = settings.apiKey;
@@ -2461,6 +2503,90 @@ app.post("/api/domain-providers/config", async (req, env) => {
         return response({ code: 200, msg: 'CONFIG_SAVED' });
     } catch (err) {
         return error('SAVE_FAILED: ' + err.message, 500);
+    }
+});
+
+// DNSHE Account Management Endpoints
+app.post("/api/dnshe/accounts", async (req, env) => {
+    try {
+        const account = await req.json();
+        const config = await getProviderConfig(env);
+        
+        if (!Array.isArray(config.dnshe)) {
+            config.dnshe = [];
+        }
+        
+        const newAccount = {
+            id: account.id || 'dnshe_' + Date.now().toString(36),
+            name: account.name || 'DNSHE Account ' + (config.dnshe.length + 1),
+            enabled: account.enabled !== false,
+            apiKey: account.apiKey || '',
+            apiSecret: account.apiSecret || ''
+        };
+        
+        config.dnshe.push(newAccount);
+        await env.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(config));
+        
+        return response({ code: 200, data: newAccount });
+    } catch (err) {
+        return error('ADD_FAILED: ' + err.message, 500);
+    }
+});
+
+app.put("/api/dnshe/accounts/:id", async (req, env) => {
+    try {
+        const url = new URL(req.url);
+        const accountId = url.pathname.split('/').pop();
+        const updates = await req.json();
+        const config = await getProviderConfig(env);
+        
+        if (!Array.isArray(config.dnshe)) {
+            throw new Error('No DNSHE accounts configured');
+        }
+        
+        const index = config.dnshe.findIndex(acc => acc.id === accountId);
+        if (index === -1) {
+            throw new Error('DNSHE account not found: ' + accountId);
+        }
+        
+        const account = config.dnshe[index];
+        if (updates.name !== undefined) account.name = updates.name;
+        if (updates.enabled !== undefined) account.enabled = updates.enabled;
+        if (updates.apiKey !== undefined && !updates.apiKey.endsWith('***')) {
+            account.apiKey = updates.apiKey;
+        }
+        if (updates.apiSecret !== undefined && !updates.apiSecret.endsWith('***')) {
+            account.apiSecret = updates.apiSecret;
+        }
+        
+        await env.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(config));
+        return response({ code: 200, data: account });
+    } catch (err) {
+        return error('UPDATE_FAILED: ' + err.message, 500);
+    }
+});
+
+app.delete("/api/dnshe/accounts/:id", async (req, env) => {
+    try {
+        const url = new URL(req.url);
+        const accountId = url.pathname.split('/').pop();
+        const config = await getProviderConfig(env);
+        
+        if (!Array.isArray(config.dnshe)) {
+            throw new Error('No DNSHE accounts configured');
+        }
+        
+        const index = config.dnshe.findIndex(acc => acc.id === accountId);
+        if (index === -1) {
+            throw new Error('DNSHE account not found: ' + accountId);
+        }
+        
+        config.dnshe.splice(index, 1);
+        await env.RENEW_KV.put(DOMAIN_PROVIDERS_KV_KEY, JSON.stringify(config));
+        
+        return response({ code: 200, data: { success: true, deleted: accountId } });
+    } catch (err) {
+        return error('DELETE_FAILED: ' + err.message, 500);
     }
 });
 
@@ -2494,7 +2620,27 @@ async function syncDomainsFromProvider(env, provider) {
         if (data.status !== 'SUCCESS') throw new Error('Porkbun API error: ' + data.message);
         domains = Object.entries(data.domains || {}).map(([domain, info]) => ({ name: domain, expires: null }));
     } else if (provider === 'dnshe') {
-        domains = await fetchDnsheDomains(providerConfig);
+        // Handle multiple DNSHE accounts
+        const enabledAccounts = getEnabledDnsheAccounts(config);
+        if (enabledAccounts.length === 0) {
+            throw new Error('DNSHE API not configured. Please add at least one DNSHE account.');
+        }
+        
+        for (const account of enabledAccounts) {
+            try {
+                console.log(`[DNSHE] Syncing from account: ${account.name || account.id}`);
+                const accountDomains = await fetchDnsheDomains(account);
+                // Add account info to each domain
+                domains.push(...accountDomains.map(d => ({
+                    ...d,
+                    accountId: account.id,
+                    accountName: account.name
+                })));
+            } catch (err) {
+                console.error(`[DNSHE] Failed to sync from account ${account.name || account.id}:`, err.message);
+                // Continue with other accounts
+            }
+        }
     } else if (provider === 'digitalplat') {
         domains = await fetchDigitalPlatDomains(providerConfig);
     }
@@ -2546,7 +2692,71 @@ app.post("/api/sync-domains/porkbun", async (req, env) => {
 });
 
 app.post("/api/sync-domains/dnshe", async (req, env) => {
-    return await syncSingleProvider(env, 'dnshe');
+    try {
+        let body = {};
+        try { body = await req.json(); } catch (e) {}
+        
+        const accountId = body.accountId;
+        const config = await getProviderConfig(env);
+        
+        let domains = [];
+        
+        if (accountId) {
+            // Sync from specific account
+            const account = (config.dnshe || []).find(acc => acc.id === accountId);
+            if (!account || !account.enabled || !account.apiKey || !account.apiSecret) {
+                throw new Error('DNSHE account not found or not configured: ' + accountId);
+            }
+            domains = await fetchDnsheDomains(account);
+            domains = domains.map(d => ({ ...d, accountId: account.id, accountName: account.name }));
+        } else {
+            // Sync from all enabled accounts
+            const enabledAccounts = getEnabledDnsheAccounts(config);
+            if (enabledAccounts.length === 0) {
+                throw new Error('DNSHE API not configured. Please add at least one DNSHE account.');
+            }
+            
+            for (const account of enabledAccounts) {
+                try {
+                    const accountDomains = await fetchDnsheDomains(account);
+                    domains.push(...accountDomains.map(d => ({ ...d, accountId: account.id, accountName: account.name })));
+                } catch (err) {
+                    console.error(`[DNSHE] Failed to sync from account ${account.name || account.id}:`, err.message);
+                }
+            }
+        }
+        
+        // Import domains
+        const currentPkg = await DataStore.getItemsPackage(env);
+        const items = currentPkg.items || [];
+        const existing = new Set(items.filter(i => i.tags?.includes('Domain')).map(i => i.name.toLowerCase()));
+        const imported = [], skipped = [];
+        
+        for (const domain of domains) {
+            if (existing.has(domain.name.toLowerCase())) {
+                skipped.push({ name: domain.name, status: 'skipped' });
+                continue;
+            }
+            imported.push({
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                name: domain.name, tags: ['Domain', 'dnshe'], type: 'reset', enabled: true,
+                createDate: new Date().toISOString().split('T')[0],
+                lastRenewDate: new Date().toISOString().split('T')[0],
+                intervalDays: 365, cycleUnit: 'year', notifyDays: 30, notifyTime: '09:00',
+                autoRenew: false, message: 'Provider: DNSHE' + (domain.accountName ? ' (' + domain.accountName + ')' : ''), fixedPrice: 0, currency: 'USD',
+                notifyTimes: ['09:00'], notifyChannelIds: [], renewHistory: [], renewUrl: ''
+            });
+            existing.add(domain.name.toLowerCase());
+        }
+        
+        if (imported.length > 0) {
+            await DataStore.saveItems(env, [...items, ...imported], null, true);
+        }
+        
+        return response({ code: 200, data: { synced: imported.length, skipped: skipped.length } });
+    } catch (err) {
+        return error('SYNC_FAILED: ' + err.message, 500);
+    }
 });
 
 app.post("/api/sync-domains/digitalplat", async (req, env) => {
@@ -2558,16 +2768,52 @@ app.post("/api/sync-domains/all", async (req, env) => {
         const results = { cloudflare: null, porkbun: null, dnshe: null, digitalplat: null, total: 0 };
         const config = await getProviderConfig(env);
         
-        for (const provider of ['cloudflare', 'porkbun', 'dnshe', 'digitalplat']) {
-            if (config[provider]?.enabled) {
-                try {
-                    results[provider] = await syncDomainsFromProvider(env, provider);
-                    results.total += results[provider].synced;
-                } catch (err) {
-                    results[provider] = { error: err.message };
-                }
+        // Sync Cloudflare
+        if (config.cloudflare?.enabled) {
+            try {
+                results.cloudflare = await syncDomainsFromProvider(env, 'cloudflare');
+                results.total += results.cloudflare.synced;
+            } catch (err) {
+                results.cloudflare = { error: err.message };
             }
         }
+        
+        // Sync Porkbun
+        if (config.porkbun?.enabled) {
+            try {
+                results.porkbun = await syncDomainsFromProvider(env, 'porkbun');
+                results.total += results.porkbun.synced;
+            } catch (err) {
+                results.porkbun = { error: err.message };
+            }
+        }
+        
+        // Sync DNSHE (multiple accounts)
+        if (hasDnsheAccounts(config)) {
+            try {
+                results.dnshe = await syncDomainsFromProvider(env, 'dnshe');
+                results.total += results.dnshe.synced;
+                // Add account details
+                results.dnshe.accounts = config.dnshe.map(acc => ({
+                    id: acc.id,
+                    name: acc.name,
+                    configured: !!(acc.enabled && acc.apiKey && acc.apiSecret)
+                }));
+            } catch (err) {
+                results.dnshe = { error: err.message };
+            }
+        }
+        
+        // Sync DigitalPlat
+        if (config.digitalplat?.enabled) {
+            try {
+                results.digitalplat = await syncDomainsFromProvider(env, 'digitalplat');
+                results.total += results.digitalplat.synced;
+            } catch (err) {
+                results.digitalplat = { error: err.message };
+            }
+        }
+        
         return response({ code: 200, data: results });
     } catch (err) {
         return error('SYNC_FAILED: ' + err.message, 500);
@@ -2577,8 +2823,53 @@ app.post("/api/sync-domains/all", async (req, env) => {
 // Test provider connection
 app.post("/api/domain-providers/test", async (req, env) => {
     try {
-        const { provider } = await req.json();
+        const { provider, accountId } = await req.json();
         const config = await getProviderConfig(env);
+        
+        // Handle DNSHE multi-account testing
+        if (provider === 'dnshe') {
+            if (accountId) {
+                // Test specific account
+                const account = (config.dnshe || []).find(acc => acc.id === accountId);
+                if (!account || !account.enabled) {
+                    return error('ACCOUNT_NOT_FOUND', 400);
+                }
+                
+                try {
+                    const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
+                        headers: getDnsheHeaders(account)
+                    });
+                    const data = await safeReadJson(resp.clone());
+                    const success = resp.ok && data?.success !== false;
+                    return response({ code: 200, data: { success, message: success ? `Account ${account.name} connected` : (data?.message || 'API key invalid') } });
+                } catch (err) {
+                    return response({ code: 200, data: { success: false, message: err.message } });
+                }
+            } else {
+                // Test all accounts
+                const results = [];
+                for (const account of (config.dnshe || [])) {
+                    if (!account.enabled || !account.apiKey || !account.apiSecret) continue;
+                    
+                    try {
+                        const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
+                            headers: getDnsheHeaders(account)
+                        });
+                        const data = await safeReadJson(resp.clone());
+                        results.push({
+                            id: account.id,
+                            name: account.name,
+                            success: resp.ok && data?.success !== false,
+                            message: resp.ok ? 'Connected' : (data?.message || 'Invalid')
+                        });
+                    } catch (err) {
+                        results.push({ id: account.id, name: account.name, success: false, message: err.message });
+                    }
+                }
+                return response({ code: 200, data: { accounts: results } });
+            }
+        }
+        
         const providerConfig = config[provider];
         
         if (!providerConfig || !providerConfig.enabled) {
@@ -2605,15 +2896,6 @@ app.post("/api/domain-providers/test", async (req, env) => {
                 const data = await resp.json();
                 testResult = data.status === 'SUCCESS';
                 testMessage = data.status === 'SUCCESS' ? 'Connection successful' : (data.message || 'Verification failed');
-            } else if (provider === 'dnshe') {
-                const resp = await fetch('https://api005.dnshe.com/index.php?m=domain_hub&endpoint=subdomains&action=list&per_page=1', {
-                    headers: getDnsheHeaders(providerConfig)
-                });
-                const data = await safeReadJson(resp.clone());
-                testResult = resp.ok && data?.success !== false;
-                testMessage = testResult
-                    ? 'Connection successful'
-                    : (data?.message || await describeProviderHttpError('DNSHE', resp));
             } else if (provider === 'digitalplat') {
                 try {
                     await fetchDigitalPlatDomains(providerConfig, 1);

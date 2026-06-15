@@ -78,7 +78,7 @@
     </div>
   </div>
 
-  <!-- DNSHE 配置 -->
+  <!-- DNSHE 配置 (支持多账户) -->
   <div class="provider-card" style="margin-bottom: 16px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter);">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
       <div style="display: flex; align-items: center; gap: 8px;">
@@ -86,23 +86,47 @@
         <span style="font-weight: 600;">DNSHE</span>
         <span id="dnshe-config-status" style="font-size: 12px; color: var(--el-text-color-secondary);">未配置</span>
       </div>
-      <el-switch id="dnshe-enabled" v-model="providers.dnshe.enabled" @change="saveProvider('dnshe')"></el-switch>
+      <el-button size="small" type="primary" @click="addDnsheAccount()">+ 添加账户</el-button>
     </div>
-    <div id="dnshe-config-form" style="display: none;">
-      <div style="display: grid; gap: 12px;">
-        <div>
-          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Key</label>
-          <el-input id="dnshe-api-key" v-model="providers.dnshe.apiKey" placeholder="输入API Key" show-password @blur="saveProvider('dnshe')"></el-input>
+    
+    <!-- DNSHE 账户列表 -->
+    <div id="dnshe-accounts-list">
+      <div v-for="(account, index) in providers.dnshe" :key="account.id" 
+           class="dnshe-account-item"
+           style="margin-bottom: 12px; padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; background: var(--el-bg-color);">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-input v-model="account.name" size="small" style="width: 200px;" @blur="saveDnsheAccount(account)"></el-input>
+            <el-switch v-model="account.enabled" size="small" @change="saveDnsheAccount(account)"></el-switch>
+            <span style="font-size: 12px; color: var(--el-text-color-secondary);">
+              {{ account.configured ? '✅ 已配置' : '⚠️ 未配置' }}
+            </span>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <el-button size="small" type="primary" link @click="testDnsheAccount(account)">测试</el-button>
+            <el-button size="small" type="success" link @click="syncDnsheAccount(account)">同步</el-button>
+            <el-button size="small" type="danger" link @click="removeDnsheAccount(account.id)">删除</el-button>
+          </div>
         </div>
-        <div>
-          <label style="display: block; margin-bottom: 4px; font-size: 13px; color: var(--el-text-color-secondary);">API Secret</label>
-          <el-input id="dnshe-api-secret" v-model="providers.dnshe.apiSecret" placeholder="输入API Secret" show-password @blur="saveProvider('dnshe')"></el-input>
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <el-button size="small" type="primary" @click="testProvider('dnshe')">测试连接</el-button>
-          <el-button size="small" @click="syncDomains('dnshe')">同步域名</el-button>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <el-input v-model="account.apiKey" placeholder="API Key" show-password size="small" @blur="saveDnsheAccount(account)"></el-input>
+          <el-input v-model="account.apiSecret" placeholder="API Secret" show-password size="small" @blur="saveDnsheAccount(account)"></el-input>
         </div>
       </div>
+    </div>
+    
+    <!-- 空状态 -->
+    <div v-if="!providers.dnshe || providers.dnshe.length === 0" 
+         style="text-align: center; padding: 20px; color: var(--el-text-color-secondary);">
+      <p>尚未添加 DNSHE 账户</p>
+      <el-button size="small" type="primary" @click="addDnsheAccount()">添加第一个账户</el-button>
+    </div>
+    
+    <!-- 批量操作 -->
+    <div v-if="providers.dnshe && providers.dnshe.length > 0" 
+         style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--el-border-color-lighter); display: flex; gap: 8px;">
+      <el-button size="small" type="primary" @click="testAllDnsheAccounts()">测试所有账户</el-button>
+      <el-button size="small" type="success" @click="syncAllDnsheAccounts()">同步所有账户</el-button>
     </div>
   </div>
 
@@ -143,7 +167,7 @@
 const providerConfig = reactive({
   cloudflare: { enabled: false, apiKey: '', email: '', apiType: 'global' },
   porkbun: { enabled: false, apiKey: '', apiSecret: '' },
-  dnshe: { enabled: false, apiKey: '', apiSecret: '' },
+  dnshe: [], // Array to support multiple DNSHE accounts
   digitalplat: { enabled: false, apiKey: '', apiSecret: '' }
 });
 
@@ -305,6 +329,211 @@ function showTestResult(type, message) {
   
   if (type !== 'info') {
     setTimeout(() => { resultEl.style.display = 'none'; }, 5000);
+  }
+}
+
+// ============ DNSHE Multi-Account Functions ============
+
+// Add a new DNSHE account
+async function addDnsheAccount() {
+  if (!Array.isArray(providerConfig.dnshe)) {
+    providerConfig.dnshe = [];
+  }
+  
+  const newAccount = {
+    id: 'dnshe_' + Date.now().toString(36),
+    name: 'DNSHE Account ' + (providerConfig.dnshe.length + 1),
+    enabled: true,
+    apiKey: '',
+    apiSecret: '',
+    configured: false
+  };
+  
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/dnshe/accounts', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(newAccount)
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      providerConfig.dnshe.push(data.data);
+      showTestResult('success', '账户已添加');
+    } else {
+      showTestResult('error', '添加失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '添加失败: ' + error.message);
+  }
+}
+
+// Save a DNSHE account
+async function saveDnsheAccount(account) {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/dnshe/accounts/' + account.id, {
+      method: 'PUT',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(account)
+    });
+    
+    const data = await response.json();
+    if (data.code !== 200) {
+      showTestResult('error', '保存失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '保存失败: ' + error.message);
+  }
+}
+
+// Remove a DNSHE account
+async function removeDnsheAccount(accountId) {
+  if (!confirm('确定要删除这个 DNSHE 账户吗？')) return;
+  
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/dnshe/accounts/' + accountId, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      const index = providerConfig.dnshe.findIndex(a => a.id === accountId);
+      if (index > -1) providerConfig.dnshe.splice(index, 1);
+      showTestResult('success', '账户已删除');
+    } else {
+      showTestResult('error', '删除失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '删除失败: ' + error.message);
+  }
+}
+
+// Test a specific DNSHE account
+async function testDnsheAccount(account) {
+  try {
+    showTestResult('info', '正在测试账户: ' + account.name + '...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers/test', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ provider: 'dnshe', accountId: account.id })
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      if (data.data.success) {
+        showTestResult('success', account.name + ': 连接成功');
+      } else {
+        showTestResult('error', account.name + ': 连接失败 - ' + data.data.message);
+      }
+    } else {
+      showTestResult('error', '测试失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '测试失败: ' + error.message);
+  }
+}
+
+// Sync from a specific DNSHE account
+async function syncDnsheAccount(account) {
+  try {
+    showTestResult('info', '正在同步: ' + account.name + '...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/sync-domains/dnshe', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ accountId: account.id })
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      const result = data.data;
+      showTestResult('success', account.name + ': 同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个');
+    } else {
+      showTestResult('error', '同步失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '同步失败: ' + error.message);
+  }
+}
+
+// Test all DNSHE accounts
+async function testAllDnsheAccounts() {
+  try {
+    showTestResult('info', '正在测试所有 DNSHE 账户...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/domain-providers/test', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ provider: 'dnshe' })
+    });
+    
+    const data = await response.json();
+    if (data.code === 200 && data.data.accounts) {
+      const results = data.data.accounts;
+      const successCount = results.filter(r => r.success).length;
+      const failCount = results.filter(r => !r.success).length;
+      
+      let message = `测试完成: ${successCount} 个成功`;
+      if (failCount > 0) {
+        message += `, ${failCount} 个失败`;
+      }
+      
+      showTestResult(failCount > 0 ? 'error' : 'success', message);
+    } else {
+      showTestResult('error', '测试失败: ' + (data.msg || 'Unknown error'));
+    }
+  } catch (error) {
+    showTestResult('error', '测试失败: ' + error.message);
+  }
+}
+
+// Sync from all DNSHE accounts
+async function syncAllDnsheAccounts() {
+  try {
+    showTestResult('info', '正在同步所有 DNSHE 账户...');
+    
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetch('/api/sync-domains/dnshe', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({}) // Empty body = sync all accounts
+    });
+    
+    const data = await response.json();
+    if (data.code === 200) {
+      const result = data.data;
+      showTestResult('success', '同步完成！导入 ' + result.synced + ' 个，跳过 ' + result.skipped + ' 个');
+    } else {
+      showTestResult('error', '同步失败: ' + data.msg);
+    }
+  } catch (error) {
+    showTestResult('error', '同步失败: ' + error.message);
   }
 }
 
