@@ -3,9 +3,15 @@
  * Handles JWT authentication, password verification, and token management
  */
 
+// Helper: Get settings directly from KV (avoid circular dependency)
+async function getSettingsFromKV(env) {
+    const data = await env.RENEW_KV.get('settings', { type: 'json' });
+    return data || { jwtSecret: '' };
+}
+
 const Auth = {
     async login(password, env) {
-        const settings = await DataStore.getSettings(env);
+        const settings = await getSettingsFromKV(env);
         if (password === (env.AUTH_PASSWORD || "admin"))
             return await this.sign(settings.jwtSecret);
         throw new Error("PASSWORD_ERROR");
@@ -14,7 +20,7 @@ const Auth = {
     async verify(req, env) {
         const authHeader = req.headers.get("Authorization");
         if (!authHeader) return false;
-        const settings = await DataStore.getSettings(env);
+        const settings = await getSettingsFromKV(env);
         return await this.verifyToken(
             authHeader.replace("Bearer ", ""),
             settings.jwtSecret
