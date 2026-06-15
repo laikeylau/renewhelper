@@ -157,7 +157,40 @@ async function importData() {
     
     try {
       const text = await file.text()
-      const data = JSON.parse(text)
+      let data
+      
+      try {
+        data = JSON.parse(text)
+      } catch (parseError) {
+        ElMessage.error('文件格式错误: 无法解析 JSON')
+        return
+      }
+      
+      // Validate backup format
+      if (!data.items && !data.settings) {
+        ElMessage.error('无效的备份文件格式')
+        return
+      }
+      
+      // Confirm import
+      const itemCount = data.items ? data.items.length : 0
+      const hasSettings = data.settings && Object.keys(data.settings).length > 0
+      
+      try {
+        await ElMessageBox.confirm(
+          `即将导入 ${itemCount} 个服务项${hasSettings ? ' 和设置数据' : ''}，是否继续？`,
+          '确认导入',
+          {
+            confirmButtonText: '导入',
+            cancelButtonText: '取消',
+            type: 'info'
+          }
+        )
+      } catch (confirmError) {
+        return // User cancelled
+      }
+      
+      ElMessage.info('正在导入...')
       
       const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token')
       const response = await fetch('/api/import', {
@@ -171,8 +204,13 @@ async function importData() {
       
       const result = await response.json()
       if (result.code === 200) {
-        ElMessage.success('数据导入成功')
-        window.location.reload()
+        let message = '数据导入成功'
+        if (result.data) {
+          message += `: 导入 ${result.data.itemsImported || 0} 个服务项`
+        }
+        ElMessage.success(message)
+        // Reload after a short delay
+        setTimeout(() => window.location.reload(), 1000)
       } else {
         ElMessage.error('导入失败: ' + result.msg)
       }

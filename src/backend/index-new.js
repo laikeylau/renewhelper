@@ -798,13 +798,51 @@ app.post("/api/import", async (req, env) => {
     if (!(await Auth.verify(req, env))) return error('Unauthorized', 401);
     try {
         const data = await req.json();
-        if (data.items) {
-            await DataStore.saveItems(env, data.items);
+        
+        // Handle backup format with meta field
+        const items = data.items || [];
+        const settings = data.settings || {};
+        
+        // Merge settings (don't overwrite JWT secret)
+        if (Object.keys(settings).length > 0) {
+            const currentSettings = await DataStore.getSettings(env);
+            const mergedSettings = { ...settings };
+            // Keep the current JWT secret
+            if (currentSettings.jwtSecret) {
+                mergedSettings.jwtSecret = currentSettings.jwtSecret;
+            }
+            // Ensure channels array is properly handled
+            if (settings.channels && Array.isArray(settings.channels)) {
+                mergedSettings.channels = settings.channels;
+            }
+            await DataStore.saveSettings(env, mergedSettings);
         }
-        if (data.settings) {
-            await DataStore.saveSettings(env, data.settings);
+        
+        // Import items
+        if (items.length > 0) {
+            // Get existing items to merge
+            const existingItems = await DataStore.getItems(env);
+            const existingIds = new Set(existingItems.map(i => i.id));
+            
+            // Merge: keep existing items, add new ones
+            const mergedItems = [...existingItems];
+            for (const item of items) {
+                if (!existingIds.has(item.id)) {
+                    mergedItems.push(item);
+                }
+            }
+            
+            await DataStore.saveItems(env, mergedItems);
         }
-        return response({ code: 200, msg: 'IMPORT_SUCCESS' });
+        
+        return response({ 
+            code: 200, 
+            msg: 'IMPORT_SUCCESS',
+            data: {
+                itemsImported: items.length,
+                settingsImported: Object.keys(settings).length > 0
+            }
+        });
     } catch (err) {
         return error('IMPORT_FAILED: ' + err.message, 500);
     }
