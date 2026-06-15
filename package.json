@@ -1,6 +1,6 @@
 {
   "name": "renewhelper",
-  "version": "3.8.21",
+  "version": "3.8.22",
   "description": "A serverless service lifecycle manager on Cloudflare Workers",
   "main": "_worker.js",
   "keywords": [
@@ -41,5 +41,9 @@
     "vite-plugin-singlefile": "^2.3.0",
     "vue": "^3.5.27",
     "wrangler": "^4.61.1"
+  },
+  "dependencies": {
+    "pinia": "^3.0.4",
+    "vue-router": "^4.6.4"
   }
 }

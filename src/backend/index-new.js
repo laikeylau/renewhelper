@@ -47,7 +47,9 @@ import {
     measurePerformance,
     Router,
     response,
-    error
+    error,
+    parseCsvToItems,
+    parseJsonToItems
 } from './modules/index.js';
 
 // APP_VERSION will be injected at build time
@@ -698,6 +700,63 @@ app.post("/api/import", async (req, env) => {
             await DataStore.saveSettings(env, data.settings);
         }
         return response({ code: 200, msg: 'IMPORT_SUCCESS' });
+    } catch (err) {
+        return error('IMPORT_FAILED: ' + err.message, 500);
+    }
+});
+
+// Batch import (CSV/JSON)
+app.post("/api/import/batch", async (req, env) => {
+    if (!(await Auth.verify(req, env))) return error('Unauthorized', 401);
+    try {
+        const formData = await req.formData();
+        const file = formData.get('file');
+        const provider = formData.get('provider') || 'batch-import';
+        
+        if (!file) {
+            return error('No file provided', 400);
+        }
+        
+        const text = await file.text();
+        let newItems = [];
+        
+        if (file.name.endsWith('.csv')) {
+            newItems = parseCsvToItems(text, provider);
+        } else if (file.name.endsWith('.json')) {
+            newItems = parseJsonToItems(text, provider);
+        } else {
+            return error('Unsupported file format. Please use CSV or JSON.', 400);
+        }
+        
+        // Filter out duplicates
+        const existingItems = await DataStore.getItems(env);
+        const existingNames = new Set(existingItems.map(i => i.name.toLowerCase()));
+        
+        const imported = [];
+        const skipped = [];
+        
+        for (const item of newItems) {
+            if (!item) continue;
+            if (existingNames.has(item.name.toLowerCase())) {
+                skipped.push({ name: item.name, status: 'skipped' });
+                continue;
+            }
+            imported.push(item);
+            existingNames.add(item.name.toLowerCase());
+        }
+        
+        if (imported.length > 0) {
+            await DataStore.saveItems(env, [...existingItems, ...imported], null, true);
+        }
+        
+        return response({
+            code: 200,
+            data: {
+                synced: imported.length,
+                skipped: skipped.length,
+                total: newItems.length
+            }
+        });
     } catch (err) {
         return error('IMPORT_FAILED: ' + err.message, 500);
     }

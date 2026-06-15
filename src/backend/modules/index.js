@@ -70,7 +70,9 @@ export {
     isExpired,
     generateId,
     maskString,
-    deepClone
+    deepClone,
+    parseCsvToItems,
+    parseJsonToItems
 } from './utils/index.js';
 
 // Logger

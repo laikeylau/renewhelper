@@ -11,6 +11,11 @@ export {
 } from './calendar.js';
 
 export {
+    parseCsvToItems,
+    parseJsonToItems
+} from './import.js';
+
+export {
     fetchExchangeRates,
     convertCurrency,
     getSupportedCurrencies,
