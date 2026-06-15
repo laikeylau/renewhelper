@@ -2533,11 +2533,9 @@ app.post("/api/dnshe/accounts", async (req, env) => {
     }
 });
 
-app.put("/api/dnshe/accounts/:id", async (req, env) => {
+app.post("/api/dnshe/accounts/update", async (req, env) => {
     try {
-        const url = new URL(req.url);
-        const accountId = url.pathname.split('/').pop();
-        const updates = await req.json();
+        const { accountId, ...updates } = await req.json();
         const config = await getProviderConfig(env);
         
         if (!Array.isArray(config.dnshe)) {
@@ -2566,10 +2564,9 @@ app.put("/api/dnshe/accounts/:id", async (req, env) => {
     }
 });
 
-app.delete("/api/dnshe/accounts/:id", async (req, env) => {
+app.post("/api/dnshe/accounts/delete", async (req, env) => {
     try {
-        const url = new URL(req.url);
-        const accountId = url.pathname.split('/').pop();
+        const { accountId } = await req.json();
         const config = await getProviderConfig(env);
         
         if (!Array.isArray(config.dnshe)) {

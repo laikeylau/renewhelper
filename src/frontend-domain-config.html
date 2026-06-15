@@ -376,13 +376,13 @@ async function addDnsheAccount() {
 async function saveDnsheAccount(account) {
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    const response = await fetch('/api/dnshe/accounts/' + account.id, {
-      method: 'PUT',
+    const response = await fetch('/api/dnshe/accounts/update', {
+      method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(account)
+      body: JSON.stringify({ accountId: account.id, ...account })
     });
     
     const data = await response.json();
@@ -400,9 +400,13 @@ async function removeDnsheAccount(accountId) {
   
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    const response = await fetch('/api/dnshe/accounts/' + accountId, {
-      method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + token }
+    const response = await fetch('/api/dnshe/accounts/delete', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ accountId })
     });
     
     const data = await response.json();
