@@ -795,9 +795,22 @@ app.get("/api/export", async (req, env) => {
 });
 
 app.post("/api/import", async (req, env) => {
-    if (!(await Auth.verify(req, env))) return error('Unauthorized', 401);
+    logger.info('Import request received');
+    
+    // Check authentication
+    const isAuth = await Auth.verify(req, env);
+    if (!isAuth) {
+        logger.error('Import authentication failed');
+        return error('Unauthorized', 401);
+    }
+    
     try {
         const data = await req.json();
+        logger.info('Import data received', { 
+            hasItems: !!data.items, 
+            itemCount: data.items?.length || 0,
+            hasSettings: !!data.settings 
+        });
         
         // Handle backup format with meta field
         const items = data.items || [];
@@ -821,8 +834,9 @@ app.post("/api/import", async (req, env) => {
                 
                 await env.RENEW_KV.put('settings', JSON.stringify(mergedSettings));
                 settingsImported = true;
+                logger.info('Settings imported successfully');
             } catch (err) {
-                console.error('Settings import error:', err);
+                logger.error('Settings import error', err);
             }
         }
         
@@ -833,6 +847,8 @@ app.post("/api/import", async (req, env) => {
                 const existingData = await env.RENEW_KV.get('items', { type: 'json' });
                 const existingItems = existingData?.items || [];
                 const existingIds = new Set(existingItems.map(i => i.id));
+                
+                logger.info('Existing items loaded', { count: existingItems.length });
                 
                 // Add new items (skip duplicates)
                 const newItems = [];
@@ -864,14 +880,17 @@ app.post("/api/import", async (req, env) => {
                     }
                 }
                 
+                logger.info('New items to import', { count: newItems.length });
+                
                 if (newItems.length > 0) {
                     const mergedItems = [...existingItems, ...newItems];
                     const version = (existingData?.version || 0) + 1;
                     await env.RENEW_KV.put('items', JSON.stringify({ items: mergedItems, version }));
                     itemsImported = newItems.length;
+                    logger.info('Items imported successfully', { count: itemsImported });
                 }
             } catch (err) {
-                console.error('Items import error:', err);
+                logger.error('Items import error', err);
                 throw err;
             }
         }
@@ -885,6 +904,7 @@ app.post("/api/import", async (req, env) => {
             }
         });
     } catch (err) {
+        logger.error('Import failed', err);
         return error('IMPORT_FAILED: ' + err.message, 500);
     }
 });
