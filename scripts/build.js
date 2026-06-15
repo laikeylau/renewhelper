@@ -70,7 +70,7 @@ async function build() {
     console.log('📦 打包 Worker 到根目录...');
     try {
         await esbuild.build({
-            entryPoints: [path.join(__dirname, '../src/backend/index.js')],
+            entryPoints: [path.join(__dirname, '../src/backend/index-new.js')],
             bundle: true,
             minify: true, // 后端代码压缩没问题
             outfile: path.join(__dirname, '../_worker.js'),
